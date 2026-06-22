@@ -393,11 +393,47 @@ select:focus,input:focus{outline:none;border-color:var(--accent-dim);box-shadow:
 .mt8{margin-top:8px}.mt16{margin-top:16px}.mt24{margin-top:24px}
 .muted{color:var(--text-tertiary)}
 
+/* ---------- Móvil / responsive ---------- */
+.mobile-topbar{display:none}
+.sb-backdrop{display:none}
+@media (max-width: 860px){
+  html,body{height:auto;min-height:100%;overflow-x:hidden;overflow-y:auto}
+  .app-shell{display:block;height:auto;overflow:visible}
+  .main{display:block;overflow:visible;min-width:0}
+  .content{overflow:visible;height:auto;padding:14px 13px 90px}
+  .topbar{padding:12px 14px;flex-wrap:wrap;gap:10px}
+  .topbar h1{font-size:17px}
+  .topbar-actions{gap:6px}
+  /* barra superior móvil con hamburguesa */
+  .mobile-topbar{display:flex;align-items:center;gap:11px;position:sticky;top:0;z-index:45;background:var(--bg-sidebar);border-bottom:1px solid var(--border-subtle);padding:9px 13px;min-height:48px}
+  .hamburger{width:40px;height:40px;border-radius:10px;border:1px solid var(--border);background:var(--bg-inset);color:var(--text-primary);font-size:19px;line-height:1;cursor:pointer;display:grid;place-items:center;flex:none;font-family:inherit}
+  .mtb-brand{font-weight:600;font-size:15px;display:flex;align-items:center;gap:8px;letter-spacing:-.01em}
+  .mtb-mark{width:26px;height:26px;border-radius:8px;flex:none;background:linear-gradient(135deg,var(--accent-bright),var(--accent-dim));display:grid;place-items:center;color:var(--text-on-accent);font-weight:800;font-size:14px}
+  /* sidebar como cajón deslizante */
+  .sidebar{position:fixed;left:0;top:0;height:100dvh;width:82vw;max-width:330px;z-index:60;transform:translateX(-100%);box-shadow:0 0 50px rgba(0,0,0,.55)}
+  .sidebar.open{transform:translateX(0)}
+  .sb-backdrop{display:block;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:55;-webkit-tap-highlight-color:transparent}
+  /* apilar contenido */
+  .kpi-grid{grid-template-columns:1fr 1fr;gap:10px;margin-bottom:6px}
+  .charts-row{display:flex;flex-direction:column;gap:14px}
+  .month-filter{padding:9px 11px;gap:6px}
+  .card-head{padding:13px 15px}
+  /* tablas: scroll horizontal en vez de romper la pantalla */
+  .table-wrap,.table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table.data{min-width:520px}
+  table.mp-conc{min-width:980px}
+  .rank-row{grid-template-columns:22px 64px 1fr 88px;gap:8px;padding:9px 11px}
+}
+@media (max-width: 480px){
+  .kpi-grid{grid-template-columns:1fr}
+  .topbar h1{font-size:16px}
+}
+
 /* ---------- Impresión / PDF del Dashboard ---------- */
 @media print {
   @page { margin: 12mm; }
   html,body{height:auto;overflow:visible;background:#fff}
-  .sidebar,.topbar,.lock-overlay,.month-filter,.lock-actions{display:none!important}
+  .sidebar,.topbar,.lock-overlay,.month-filter,.lock-actions,.mobile-topbar,.sb-backdrop{display:none!important}
   .app-shell{display:block;height:auto;overflow:visible}
   .main{overflow:visible;display:block}
   .content{overflow:visible;padding:0}
@@ -469,8 +505,16 @@ select:focus,input:focus{outline:none;border-color:var(--accent-dim);box-shadow:
 <template x-if="unlocked">
 <div class="app-shell">
 
+<!-- Barra superior SOLO móvil (hamburguesa) -->
+<div class="mobile-topbar">
+  <button class="hamburger" @click="sidebarOpen=true" aria-label="Abrir menú">☰</button>
+  <div class="mtb-brand"><span class="mtb-mark">$</span>Control de Gastos</div>
+  <span style="margin-left:auto;font-size:11px" class="muted" :style="syncEstado==='al día'||syncEstado==='actualizado'?'color:var(--accent-bright)':''" x-text="'☁ '+syncEstado"></span>
+</div>
+<div class="sb-backdrop" x-show="sidebarOpen" @click="sidebarOpen=false" x-cloak></div>
+
 <!-- ═══════════════ SIDEBAR ═══════════════ -->
-<nav class="sidebar">
+<nav class="sidebar" :class="{open: sidebarOpen}">
   <div class="brand">
     <div class="brand-mark">$</div>
     <div>
@@ -496,7 +540,7 @@ select:focus,input:focus{outline:none;border-color:var(--accent-dim);box-shadow:
       <span class="muted">☁ Nube</span>
       <span class="val" :style="syncEstado==='sin conexión'?'color:var(--warning)':(syncEstado==='al día'||syncEstado==='actualizado'?'color:var(--accent-bright)':'')" x-text="syncEstado"></span>
     </div>
-    <div class="status-row"><span class="muted">Versión</span><span class="val" style="color:var(--accent-bright)">nube v8 · 21-jun</span></div>
+    <div class="status-row"><span class="muted">Versión</span><span class="val" style="color:var(--accent-bright)">nube v9 · 22-jun</span></div>
     <div class="status-row">
       <span><span x-show="!cargando" class="status-dot"></span><span x-show="cargando" class="spinner" style="width:8px;height:8px;vertical-align:middle;margin-right:7px"></span><span x-text="cargando ? 'Cargando…' : 'En línea · cifrado'"></span></span>
       <span class="val" x-text="totalRegistros+' reg.'"></span>
@@ -1407,6 +1451,7 @@ const SUPA_URL='https://pikbmocrnlosoujjllmw.supabase.co';
 const SUPA_KEY='sb_publishable_t69jY2QTrEF8TCz9b_X4oQ_j8lS-PN_';   // clave PUBLICABLE (segura de exponer; el acceso real lo protege el id secreto + cifrado)
 const SUPA_HEADERS={ 'apikey':SUPA_KEY, 'Authorization':'Bearer '+SUPA_KEY, 'Content-Type':'application/json' };
 let SYNC_ID=null;   // id del casillero, derivado de la contraseña (no se persiste)
+let SYNC_PWD=null;  // contraseña en memoria SOLO durante la sesión (se borra al bloquear); permite re-descifrar la nube si su sal difiere de la local
 const SYNC_ID_SALT=new TextEncoder().encode('gastos-sync-id-v1');   // sal FIJA: misma contraseña -> mismo id en todos los equipos
 async function deriveSyncId(password){
   const bk=await crypto.subtle.importKey('raw', new TextEncoder().encode(password), {name:'PBKDF2'}, false, ['deriveBits']);
@@ -1432,7 +1477,7 @@ function app(){
     view:'dashboard', cargando:true, anoActivo:'2026', ultimaSync:'—', totalRegistros:0, mpDataNote:true, syncEstado:'—',
     egresos:[], ingresos:[], patrimonio:[], yoyRows:[], mpTransacciones:[], mpPreCargadas:[], mpFiltro:'todos', mpUltimoReporte:null,
     kpi:{ing:0,fijo:0,vari:0,util:0,egr:0}, kpiPrev:{ing:0,fijo:0,vari:0,util:0,egr:0},
-    dashMeses:[], rankBy:'gasto', egVista:'macro', expandedCats:{}, expandedMacros:{}, macroOverrides:{}, MACROS:MACROS_LIST,
+    dashMeses:[], rankBy:'gasto', egVista:'macro', expandedCats:{}, expandedMacros:{}, macroOverrides:{}, MACROS:MACROS_LIST, sidebarOpen:false,
     charts:{},
     fE:{ano:'2026',meses:[],cat:'',tipo:'',q:'',pag:1,sortK:'fecha',sortD:'desc',ordenCat:'monto'},
     fI:{ano:'2026',mes:'',cat:'',soloReemb:false,pag:1,sortK:'fecha',sortD:'desc'},
@@ -1746,22 +1791,51 @@ function app(){
       try{
         this.syncEstado='revisando';
         const row=await cloudFetch();
-        if(!row){ if(opts.seedIfEmpty) await this._cloudPush(); else this.syncEstado='al día'; return; }
+        const localCount=this.egresos.length+this.ingresos.length;
         const meta=await db.vault.get('meta');
         const localTS=(meta&&meta.cloud_ts)||'';
-        if((row.updated_at||'')>localTS){
-          let plain;
-          try{ plain=await decryptJSON({iv:row.iv,ct:row.ct}, VAULT_KEY); }
-          catch(e){ this.syncEstado='al día'; return; }   // sal distinta (otra contraseña): se ignora
-          await db.vault.put({k:'blob', iv:row.iv, ct:row.ct});
-          await db.vault.update('meta',{cloud_ts:row.updated_at, salt:row.salt});
-          this._hidratar(plain);
-          await this.reloadData();
-          this.syncEstado='actualizado';
-        } else if(localTS && localTS>(row.updated_at||'')){
-          await this._cloudPush();   // lo local es más nuevo: subirlo
-        } else { this.syncEstado='al día'; }
+        if(!row){
+          if(localCount>0 || opts.seedIfEmpty){ await this._cloudPush(); } else { this.syncEstado='al día'; }
+          return;
+        }
+        const nubeMasNueva=(row.updated_at||'')>localTS;
+        if(!nubeMasNueva){
+          if(localTS && localTS>(row.updated_at||'') && localCount>0){ await this._cloudPush(); }
+          else { this.syncEstado='al día'; }
+          return;
+        }
+        // La nube es más nueva: intentar leerla (re-derivando con su sal si hace falta)
+        const plain=await this._descifrarNube(row);
+        if(plain===null){
+          if(localCount>0){ await this._cloudPush(); }   // no la pude descifrar pero tengo datos -> mando los míos
+          else { this.syncEstado='sin conexión'; }
+          return;
+        }
+        const nubeCount=((plain.egresos&&plain.egresos.length)||0)+((plain.ingresos&&plain.ingresos.length)||0);
+        if(nubeCount===0 && localCount>0){ await this._cloudPush(); return; }   // nube vacía + yo con datos -> NO pisar lo mío
+        await this._aplicarNube(row, plain);
+        this.syncEstado='actualizado';
       }catch(e){ this.syncEstado='sin conexión'; }
+    },
+    // Descifra el blob de la nube; si la sal difiere de la local, re-deriva con la contraseña en memoria
+    async _descifrarNube(row){
+      try{ return await decryptJSON({iv:row.iv,ct:row.ct}, VAULT_KEY); }catch(e){}
+      if(SYNC_PWD){ try{ const k=await deriveKey(SYNC_PWD, b64ToBuf(row.salt)); return await decryptJSON({iv:row.iv,ct:row.ct}, k); }catch(e){} }
+      return null;
+    },
+    // Guarda el blob de la nube como local, ajustando sal/clave/verifier si la sal cambió
+    async _aplicarNube(row, plain){
+      let key=VAULT_KEY;
+      if(SYNC_PWD){ try{ key=await deriveKey(SYNC_PWD, b64ToBuf(row.salt)); }catch(e){ key=VAULT_KEY; } }
+      const ver=await encryptJSON(VERIFIER_PLAINTEXT, key);
+      await db.vault.bulkPut([
+        { k:'meta', kdf:'PBKDF2', hash:KDF_HASH, iter:KDF_ITER, salt:row.salt, v:1, cloud_ts:row.updated_at },
+        { k:'verifier', iv:ver.iv, ct:ver.ct },
+        { k:'blob', iv:row.iv, ct:row.ct }
+      ]);
+      VAULT_KEY=key;
+      this._hidratar(plain);
+      await this.reloadData();
     },
     _startAutoSync(){
       if(this._syncTimer) clearInterval(this._syncTimer);
@@ -1802,7 +1876,7 @@ function app(){
             await Promise.all([db.egresos.clear(),db.ingresos.clear(),db.patrimonio.clear(),db.yoy.clear(),db.mp_hist.clear(),db.notas.clear(),db.macromap.clear()]);
           });
         }
-        SYNC_ID=await deriveSyncId(g.pwd);   // id del casillero (antes de limpiar la contraseña)
+        SYNC_ID=await deriveSyncId(g.pwd); SYNC_PWD=g.pwd;   // id + contraseña en memoria (antes de limpiarla)
         g.pwd=''; g.pwd2='';
         this._hidratar(plain);
         this.unlocked=true;
@@ -1827,7 +1901,7 @@ function app(){
       }
       try{
         VAULT_KEY=key;
-        SYNC_ID=await deriveSyncId(g.pwd);   // id del casillero (antes de limpiar la contraseña)
+        SYNC_ID=await deriveSyncId(g.pwd); SYNC_PWD=g.pwd;   // id + contraseña en memoria (antes de limpiarla)
         const plain=await loadVaultBlob(VAULT_KEY);
         this._hidratar(plain||{});
         g.intentos=0; g.bloqueadoHasta=0; g.pwd='';
@@ -1845,7 +1919,7 @@ function app(){
       if(!g.pwd){ g.error='Ingresa tu contraseña.'; return; }
       this.cargando=true; g.error=''; this._sinNube=false;
       try{
-        SYNC_ID=await deriveSyncId(g.pwd);
+        SYNC_ID=await deriveSyncId(g.pwd); SYNC_PWD=g.pwd;
         let row=null;
         try{ row=await cloudFetch(); }catch(e){ this._sinNube=true; }
         if(row){
@@ -1878,7 +1952,7 @@ function app(){
       upd(); this._backoffTimer=setInterval(upd,250);
     },
     bloquear(){
-      VAULT_KEY=null; SYNC_ID=null; this.unlocked=false; this.syncEstado='—';
+      VAULT_KEY=null; SYNC_ID=null; SYNC_PWD=null; this.unlocked=false; this.syncEstado='—';
       if(this._syncTimer){ clearInterval(this._syncTimer); this._syncTimer=null; }
       this.egresos=[]; this.ingresos=[]; this.patrimonio=[]; this._mpHist=[]; this.mpPreCargadas=[]; this.yoyRows=[]; this.mpTransacciones=[];
       this.gate.mode='ingresar'; this.gate.pwd=''; this.gate.error='';
@@ -1967,6 +2041,7 @@ function app(){
     // ── Navigation ──
     navTo(id){
       this.view=id;
+      this.sidebarOpen=false;   // cerrar el cajón en móvil al navegar
       this.$nextTick(()=>{
         if(id==='dashboard'){ this.initChartBar(); this.initChartTop(); }
         if(id==='yoy') this.initChartYoY();

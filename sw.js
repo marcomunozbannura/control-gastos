@@ -1,6 +1,6 @@
 // Service worker — NETWORK-FIRST (siempre intenta la última versión; usa el caché solo sin conexión)
 // Así nunca queda "pegada" una versión vieja, y la app funciona offline una vez visitada.
-const CACHE = 'gastos-cache-v8';
+const CACHE = 'gastos-cache-v9';
 const ASSETS = [
   './', './index.html', './data.js',
   './icon-192.png', './icon-512.png', './manifest.webmanifest',
