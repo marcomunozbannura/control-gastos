@@ -396,16 +396,17 @@ select:focus,input:focus{outline:none;border-color:var(--accent-dim);box-shadow:
 /* ---------- Móvil / responsive ---------- */
 .mobile-topbar{display:none}
 .sb-backdrop{display:none}
+.bottom-nav{display:none}
 @media (max-width: 860px){
   html,body{height:auto;min-height:100%;overflow-x:hidden;overflow-y:auto}
   .app-shell{display:block;height:auto;overflow:visible}
   .main{display:block;overflow:visible;min-width:0}
-  .content{overflow:visible;height:auto;padding:14px 13px 90px}
+  .content{overflow:visible;height:auto;padding:14px 13px calc(82px + env(safe-area-inset-bottom))}
   .topbar{padding:12px 14px;flex-wrap:wrap;gap:10px}
   .topbar h1{font-size:17px}
   .topbar-actions{gap:6px}
   /* barra superior móvil con hamburguesa */
-  .mobile-topbar{display:flex;align-items:center;gap:11px;position:sticky;top:0;z-index:45;background:var(--bg-sidebar);border-bottom:1px solid var(--border-subtle);padding:9px 13px;min-height:48px}
+  .mobile-topbar{display:flex;align-items:center;gap:11px;position:sticky;top:0;z-index:45;background:var(--bg-sidebar);border-bottom:1px solid var(--border-subtle);padding:calc(9px + env(safe-area-inset-top)) 13px 9px;min-height:48px}
   .hamburger{width:40px;height:40px;border-radius:10px;border:1px solid var(--border);background:var(--bg-inset);color:var(--text-primary);font-size:19px;line-height:1;cursor:pointer;display:grid;place-items:center;flex:none;font-family:inherit}
   .mtb-brand{font-weight:600;font-size:15px;display:flex;align-items:center;gap:8px;letter-spacing:-.01em}
   .mtb-mark{width:26px;height:26px;border-radius:8px;flex:none;background:linear-gradient(135deg,var(--accent-bright),var(--accent-dim));display:grid;place-items:center;color:var(--text-on-accent);font-weight:800;font-size:14px}
@@ -423,6 +424,13 @@ select:focus,input:focus{outline:none;border-color:var(--accent-dim);box-shadow:
   table.data{min-width:520px}
   table.mp-conc{min-width:980px}
   .rank-row{grid-template-columns:22px 64px 1fr 88px;gap:8px;padding:9px 11px}
+  /* barra de pestañas inferior */
+  .bottom-nav{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:50;background:var(--bg-sidebar);border-top:1px solid var(--border-subtle);padding-bottom:env(safe-area-inset-bottom);box-shadow:0 -6px 20px rgba(0,0,0,.35)}
+  .bn-item{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 2px 7px;background:none;border:none;color:var(--text-tertiary);font-size:10px;font-weight:600;font-family:inherit;cursor:pointer;position:relative}
+  .bn-item svg{width:21px;height:21px;stroke-width:1.8;color:inherit}
+  .bn-item span{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bn-item.active{color:var(--accent-bright)}
+  .bn-badge{position:absolute;top:3px;left:calc(50% + 6px);min-width:15px;height:15px;padding:0 4px;border-radius:8px;background:var(--warning);color:#0a0a0b;font-size:9px;font-weight:700;display:grid;place-items:center}
 }
 @media (max-width: 480px){
   .kpi-grid{grid-template-columns:1fr}
@@ -513,6 +521,17 @@ select:focus,input:focus{outline:none;border-color:var(--accent-dim);box-shadow:
 </div>
 <div class="sb-backdrop" x-show="sidebarOpen" @click="sidebarOpen=false" x-cloak></div>
 
+<!-- Barra de pestañas inferior SOLO móvil (navegación de un toque) -->
+<nav class="bottom-nav">
+  <template x-for="item in navItems" :key="'bn-'+item.id">
+    <button class="bn-item" :class="{active: view===item.id}" @click="navTo(item.id)">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path :d="item.icon" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span x-text="item.short"></span>
+      <span class="bn-badge" x-show="item.id==='importar' && mpPendCount>0" x-text="mpPendCount"></span>
+    </button>
+  </template>
+</nav>
+
 <!-- ═══════════════ SIDEBAR ═══════════════ -->
 <nav class="sidebar" :class="{open: sidebarOpen}">
   <div class="brand">
@@ -540,7 +559,7 @@ select:focus,input:focus{outline:none;border-color:var(--accent-dim);box-shadow:
       <span class="muted">☁ Nube</span>
       <span class="val" :style="syncEstado==='sin conexión'?'color:var(--warning)':(syncEstado==='al día'||syncEstado==='actualizado'?'color:var(--accent-bright)':'')" x-text="syncEstado"></span>
     </div>
-    <div class="status-row"><span class="muted">Versión</span><span class="val" style="color:var(--accent-bright)">nube v9 · 22-jun</span></div>
+    <div class="status-row"><span class="muted">Versión</span><span class="val" style="color:var(--accent-bright)">nube v10 · 22-jun</span></div>
     <div class="status-row">
       <span><span x-show="!cargando" class="status-dot"></span><span x-show="cargando" class="spinner" style="width:8px;height:8px;vertical-align:middle;margin-right:7px"></span><span x-text="cargando ? 'Cargando…' : 'En línea · cifrado'"></span></span>
       <span class="val" x-text="totalRegistros+' reg.'"></span>
@@ -1489,11 +1508,11 @@ function app(){
     _mpHist:[], _notas:{}, _mpUploads:[], mpReportePendiente:null, mpBanco:'Mercado Pago',
 
     navItems:[
-      {id:'dashboard',label:'Dashboard',icon:'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6'},
-      {id:'egresos',label:'Egresos',icon:'M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z'},
-      {id:'ingresos',label:'Ingresos',icon:'M12 4v16m8-8H4'},
-      {id:'importar',label:'Conciliación Bancaria',icon:'M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12'},
-      {id:'yoy',label:'YoY Utilidad',icon:'M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z'},
+      {id:'dashboard',label:'Dashboard',short:'Inicio',icon:'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6'},
+      {id:'egresos',label:'Egresos',short:'Egresos',icon:'M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z'},
+      {id:'ingresos',label:'Ingresos',short:'Ingresos',icon:'M12 4v16m8-8H4'},
+      {id:'importar',label:'Conciliación Bancaria',short:'Concil.',icon:'M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12'},
+      {id:'yoy',label:'YoY Utilidad',short:'YoY',icon:'M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z'},
     ],
     meses12:[{v:'01',l:'Enero'},{v:'02',l:'Febrero'},{v:'03',l:'Marzo'},{v:'04',l:'Abril'},{v:'05',l:'Mayo'},{v:'06',l:'Junio'},{v:'07',l:'Julio'},{v:'08',l:'Agosto'},{v:'09',l:'Septiembre'},{v:'10',l:'Octubre'},{v:'11',l:'Noviembre'},{v:'12',l:'Diciembre'}],
 
