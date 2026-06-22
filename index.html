@@ -1,0 +1,2380 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Control de Gastos — Marco Muñoz</title>
+<!-- App instalable (PWA): ícono, pantalla completa, funciona offline -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0a0a0b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Gastos">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<script>
+  // Registrar el service worker solo cuando se sirve por http(s) (no en file://). Falla en silencio si no se puede.
+  if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
+    window.addEventListener('load', function(){ navigator.serviceWorker.register('sw.js').catch(function(){}); });
+  }
+</script>
+<script>window.GASTOS_DATA = {egresos:[],ingresos:[],patrimonio:[],yoy:[],mp_raw:[]};</script>
+<script src="data.js"></script>
+<!-- Librerías auto-hospedadas (sin CDN externo, funciona offline) -->
+<script defer src="vendor/alpine.min.js"></script>
+<script src="vendor/chart.umd.min.js"></script>
+<script src="vendor/dexie.min.js"></script>
+<script src="vendor/xlsx.full.min.js"></script>
+<style>
+/* ============================================================
+   MERCURY NOIR — sistema visual (tokens)
+   ============================================================ */
+:root{
+  --bg-base:#08090b;
+  --bg-sunken:#0a0b0e;
+  --bg-surface:#0d0f12;
+  --bg-surface-2:#14161a;
+  --bg-surface-3:#1a1d22;
+  --bg-elevated:#1e2127;
+  --bg-sidebar:#0a0b0d;
+  --bg-inset:#070809;
+  --glass:rgba(255,255,255,0.022);
+  --glass-strong:rgba(255,255,255,0.04);
+
+  --border-subtle:rgba(255,255,255,0.06);
+  --border:rgba(255,255,255,0.09);
+  --border-strong:rgba(255,255,255,0.14);
+  --border-emphasis:rgba(255,255,255,0.22);
+  --divider:rgba(255,255,255,0.05);
+
+  --text-primary:#f4f5f6;
+  --text-secondary:#a4a8af;
+  --text-tertiary:#6c7077;
+  --text-quaternary:#474b52;
+  --text-on-accent:#04140d;
+
+  --accent:#34d399;
+  --accent-bright:#4ade9f;
+  --accent-dim:#1f9d72;
+  --accent-soft:rgba(52,211,153,0.12);
+  --accent-softer:rgba(52,211,153,0.06);
+  --accent-glow:rgba(52,211,153,0.28);
+  --accent-line:rgba(52,211,153,0.30);
+
+  --positive:#34d399;
+  --positive-soft:rgba(52,211,153,0.12);
+  --positive-ink:#7be9bf;
+  --negative:#fb7185;
+  --negative-soft:rgba(251,113,133,0.12);
+  --negative-ink:#fda4b3;
+  --warning:#f6c177;
+  --warning-soft:rgba(246,193,119,0.12);
+  --info:#7aa2f7;
+  --info-soft:rgba(122,162,247,0.12);
+
+  --cat-1:#34d399; --cat-2:#7aa2f7; --cat-3:#c4b5fd; --cat-4:#f6c177;
+  --cat-5:#fb7185; --cat-6:#5eead4; --cat-7:#94a3b8;
+
+  --r-xs:6px; --r-sm:8px; --r-md:11px; --r-lg:14px; --r-xl:18px; --r-pill:999px;
+
+  --shadow-sm:0 1px 2px rgba(0,0,0,0.5);
+  --shadow-md:0 4px 16px -6px rgba(0,0,0,0.7);
+  --shadow-lg:0 18px 50px -12px rgba(0,0,0,0.8);
+  --shadow-card:0 1px 0 0 rgba(255,255,255,0.03) inset, 0 8px 24px -16px rgba(0,0,0,0.9);
+  --ring-accent:0 0 0 3px var(--accent-soft);
+
+  --font-sans:"Inter","SF Pro Display",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  --font-num:"SF Mono","Inter",ui-monospace,"Roboto Mono",monospace;
+  --fs-display:30px; --fs-kpi:27px; --fs-h1:20px; --fs-h2:16px;
+  --fs-body:14px; --fs-sm:13px; --fs-xs:12px; --fs-label:11px;
+
+  --ease:cubic-bezier(0.22,0.61,0.36,1);
+  --ease-out:cubic-bezier(0.16,1,0.3,1);
+  --t-fast:120ms; --t:180ms; --t-slow:260ms;
+
+  --sidebar-w:250px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg-base);color:var(--text-primary);font-family:var(--font-sans);font-size:var(--fs-body);line-height:1.5;-webkit-font-smoothing:antialiased;letter-spacing:-0.006em}
+body{height:100vh;overflow:hidden}
+.app-shell{display:grid;grid-template-columns:var(--sidebar-w) 1fr;height:100vh;overflow:hidden}
+[x-cloak]{display:none!important}
+/* ---------- Pantalla de candado ---------- */
+.lock-overlay{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;padding:24px;background:radial-gradient(1200px 600px at 50% -10%,rgba(52,211,153,.07),transparent 60%),var(--bg-base)}
+.lock-card{width:420px;max-width:94vw;background:linear-gradient(180deg,var(--glass),transparent),var(--bg-surface);border:1px solid var(--border);border-radius:var(--r-xl);box-shadow:var(--shadow-lg);padding:30px 28px;text-align:center;animation:fadeUp var(--t-slow) var(--ease-out) both}
+.lock-mark{width:56px;height:56px;border-radius:15px;margin:0 auto 16px;background:linear-gradient(135deg,var(--accent-bright),var(--accent-dim));display:grid;place-items:center;color:var(--text-on-accent);font-weight:800;font-size:27px;box-shadow:0 0 0 1px var(--accent-line),0 12px 32px -8px var(--accent-glow)}
+.lock-title{font-size:19px;font-weight:600;letter-spacing:-.02em}
+.lock-sub{font-size:var(--fs-xs);color:var(--text-tertiary);margin-top:4px;margin-bottom:22px}
+.lock-form{display:flex;flex-direction:column;gap:13px;text-align:left}
+.lock-form label{font-size:var(--fs-xs);font-weight:600;color:var(--text-secondary);margin-bottom:6px;display:block}
+.lock-input{width:100%;height:42px;font-size:15px}
+.lock-error{font-size:var(--fs-xs);color:var(--negative-ink);background:var(--negative-soft);border:1px solid rgba(251,113,133,.3);border-radius:var(--r-sm);padding:8px 11px}
+.lock-btn{width:100%;height:42px;font-size:14px;margin-top:2px}
+.lock-note{font-size:11px;color:var(--text-quaternary);margin-top:8px;line-height:1.5;text-align:center}
+.lock-warn{font-size:11px;color:var(--warning);background:var(--warning-soft);border:1px solid rgba(246,193,119,.28);border-radius:var(--r-sm);padding:9px 11px;line-height:1.5;text-align:left}
+.strength{margin-top:8px}
+.strength-track{height:6px;border-radius:var(--r-pill);background:var(--bg-inset);overflow:hidden}
+.strength-fill{height:100%;border-radius:inherit;transition:width var(--t),background var(--t);width:0}
+.strength-label{font-size:11px;margin-top:5px;font-weight:600}
+.lock-actions{display:flex;gap:6px;margin-top:10px}
+.tabular,.mono{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1;font-family:var(--font-num)}
+::selection{background:var(--accent-soft);color:var(--accent-bright)}
+
+/* ---------- Sidebar ---------- */
+.sidebar{position:relative;height:100vh;display:flex;flex-direction:column;background:var(--bg-sidebar);border-right:1px solid var(--border-subtle);padding:20px 14px;min-width:0}
+.brand{display:flex;align-items:center;gap:11px;padding:6px 8px 18px;margin-bottom:6px;border-bottom:1px solid var(--divider)}
+.brand-mark{width:32px;height:32px;border-radius:9px;flex:none;background:linear-gradient(135deg,var(--accent-bright),var(--accent-dim));display:grid;place-items:center;color:var(--text-on-accent);font-weight:800;font-size:17px;box-shadow:0 0 0 1px var(--accent-line),0 6px 18px -8px var(--accent-glow)}
+.brand-name{font-weight:600;font-size:15px;letter-spacing:-0.02em;line-height:1.15}
+.brand-sub{font-size:10px;color:var(--text-tertiary);letter-spacing:0.1em;text-transform:uppercase;margin-top:2px}
+.sb-nav{flex:1;overflow-y:auto;padding:8px 0}
+.nav-section{font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:var(--text-quaternary);padding:14px 10px 7px;font-weight:600}
+.nav-item{display:flex;align-items:center;gap:11px;padding:9px 11px;margin:1px 0;border-radius:var(--r-sm);color:var(--text-secondary);font-size:var(--fs-sm);font-weight:500;cursor:pointer;position:relative;transition:background var(--t-fast) var(--ease),color var(--t-fast) var(--ease)}
+.nav-item svg{width:18px;height:18px;flex:none;stroke-width:1.8;color:var(--text-tertiary);transition:color var(--t-fast) var(--ease)}
+.nav-item span.lbl{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nav-item:hover{background:var(--glass-strong);color:var(--text-primary)}
+.nav-item:hover svg{color:var(--text-secondary)}
+.nav-item.active{background:var(--accent-softer);color:var(--text-primary)}
+.nav-item.active svg{color:var(--accent)}
+.nav-item.active::before{content:"";position:absolute;left:-14px;top:50%;transform:translateY(-50%);width:3px;height:18px;border-radius:0 3px 3px 0;background:var(--accent);box-shadow:0 0 12px var(--accent-glow)}
+.nav-badge{margin-left:auto;min-width:19px;height:18px;padding:0 6px;border-radius:var(--r-pill);background:var(--warning-soft);color:var(--warning);font-size:10px;font-weight:700;display:grid;place-items:center;font-variant-numeric:tabular-nums;border:1px solid rgba(246,193,119,.28)}
+.sidebar-footer{margin-top:auto;padding:14px 10px 4px;border-top:1px solid var(--divider)}
+.status-row{display:flex;align-items:center;font-size:var(--fs-xs);color:var(--text-tertiary);margin-top:4px}
+.status-row .val{margin-left:auto;color:var(--text-secondary);font-variant-numeric:tabular-nums}
+.status-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent-glow);margin-right:7px;animation:pulseDot 2.4s var(--ease) infinite}
+@keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.5}}
+
+/* ---------- Main / topbar / content ---------- */
+.main{display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.topbar{flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:15px 30px;border-bottom:1px solid var(--border-subtle);background:linear-gradient(180deg,var(--bg-sunken),rgba(10,11,14,.6));backdrop-filter:blur(8px)}
+.topbar h1{font-size:var(--fs-h1);font-weight:600;letter-spacing:-0.02em}
+.topbar .crumb{font-size:var(--fs-xs);color:var(--text-tertiary);margin-top:2px}
+.topbar-actions{display:flex;gap:9px;align-items:center}
+.content{flex:1;overflow-y:auto;padding:24px 30px 56px}
+.section-title{font-size:var(--fs-label);color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.12em;font-weight:600;margin:24px 0 13px;display:flex;align-items:center;gap:10px}
+.section-title::after{content:"";flex:1;height:1px;background:var(--divider)}
+
+/* ---------- Filtro de meses (chips) ---------- */
+.month-filter{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:18px;background:linear-gradient(180deg,var(--glass),transparent),var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--r-md);padding:10px 14px;box-shadow:var(--shadow-card)}
+.month-filter .mf-label{font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.1em;font-weight:600;color:var(--text-tertiary);margin-right:4px}
+.chip{height:28px;padding:0 13px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--bg-inset);color:var(--text-secondary);font-size:var(--fs-xs);font-weight:600;cursor:pointer;font-family:inherit;transition:all var(--t-fast) var(--ease)}
+.chip:hover{border-color:var(--border-strong);color:var(--text-primary);transform:translateY(-1px)}
+.chip.active{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-bright);box-shadow:0 0 12px -4px var(--accent-glow)}
+.chip-action{height:28px;padding:0 11px;border-radius:var(--r-sm);border:1px solid transparent;background:transparent;color:var(--text-tertiary);font-size:var(--fs-xs);font-weight:600;cursor:pointer;font-family:inherit;transition:all var(--t-fast)}
+.chip-action:hover{color:var(--text-primary);background:var(--glass-strong)}
+.month-filter .sep{width:1px;height:20px;background:var(--divider);margin:0 3px}
+
+/* ---------- Cards ---------- */
+.card{background:linear-gradient(180deg,var(--glass),transparent),var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--r-lg);box-shadow:var(--shadow-card);position:relative;overflow:hidden;transition:border-color var(--t) var(--ease),transform var(--t) var(--ease),box-shadow var(--t) var(--ease)}
+.card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px;border-bottom:1px solid var(--divider)}
+.card-head h3{font-size:var(--fs-h2);font-weight:600;letter-spacing:-0.01em}
+.card-head .sub{font-size:var(--fs-xs);color:var(--text-tertiary);margin-top:2px}
+
+/* ---------- KPI ---------- */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px;margin-bottom:8px}
+.kpi{background:linear-gradient(180deg,var(--glass),transparent),var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--r-lg);padding:18px 20px;position:relative;overflow:hidden;box-shadow:var(--shadow-card);transition:border-color var(--t) var(--ease),transform var(--t) var(--ease),box-shadow var(--t) var(--ease)}
+.kpi:hover{transform:translateY(-2px);border-color:var(--border);box-shadow:var(--shadow-md)}
+.kpi-label{font-size:var(--fs-label);font-weight:600;letter-spacing:0.09em;text-transform:uppercase;color:var(--text-tertiary)}
+.kpi-value{font-family:var(--font-num);font-variant-numeric:tabular-nums;font-size:var(--fs-kpi);font-weight:600;letter-spacing:-0.02em;margin:11px 0 7px;color:var(--text-primary)}
+.kpi-sub{font-size:var(--fs-xs);color:var(--text-tertiary);display:flex;align-items:center;gap:8px}
+.kpi-delta{display:inline-flex;align-items:center;gap:3px;font-size:var(--fs-xs);font-weight:700;font-variant-numeric:tabular-nums;padding:2px 7px;border-radius:var(--r-pill)}
+.kpi-delta.up{color:var(--positive-ink);background:var(--positive-soft)}
+.kpi-delta.down{color:var(--negative-ink);background:var(--negative-soft)}
+.kpi.is-positive::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--accent);box-shadow:0 0 16px var(--accent-glow)}
+.kpi.is-negative::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--negative);box-shadow:0 0 16px rgba(251,113,133,0.3)}
+.color-pos{color:var(--positive-ink)!important}
+.color-neg{color:var(--negative-ink)!important}
+
+/* ---------- Charts ---------- */
+.charts-row{display:grid;grid-template-columns:1.7fr 1fr;gap:16px}
+.chart-card{background:linear-gradient(180deg,var(--glass),transparent),var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--r-lg);box-shadow:var(--shadow-card);transition:border-color var(--t) var(--ease)}
+.chart-card:hover{border-color:var(--border)}
+.chart-body{padding:8px 18px 18px;position:relative}
+
+/* ---------- Tablas ---------- */
+.table-wrap{background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--shadow-card)}
+.table-scroll{overflow:auto;max-height:none}
+table.data{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-sm)}
+table.data thead th{position:sticky;top:0;z-index:2;text-align:left;background:var(--bg-sunken);color:var(--text-tertiary);font-size:var(--fs-label);font-weight:600;letter-spacing:0.07em;text-transform:uppercase;padding:11px 16px;border-bottom:1px solid var(--border);white-space:nowrap;user-select:none;cursor:pointer;transition:color var(--t-fast) var(--ease),background var(--t-fast) var(--ease)}
+table.data thead th:hover{color:var(--text-secondary);background:var(--bg-surface-2)}
+table.data thead th.num{text-align:right}
+table.data thead th .sort{margin-left:5px;color:var(--accent)}
+table.data thead th.sorted{color:var(--accent)}
+table.data tbody td{padding:11px 16px;border-bottom:1px solid var(--divider);color:var(--text-secondary);white-space:nowrap}
+table.data tbody td.strong{color:var(--text-primary);font-weight:500}
+table.data tbody tr{transition:background var(--t-fast) var(--ease)}
+table.data tbody tr:hover td{background:var(--glass)}
+table.data tbody tr:last-child td{border-bottom:none}
+td.num,th.num{text-align:right;font-family:var(--font-num);font-variant-numeric:tabular-nums}
+td.pos{color:var(--positive-ink)} td.neg{color:var(--negative-ink)}
+tr.row-dim td{opacity:.55}
+tr.row-need td{box-shadow:inset 3px 0 0 var(--warning)}
+tr.row-excl td{opacity:.45;box-shadow:inset 3px 0 0 var(--negative)}
+tr.row-ok td{box-shadow:inset 3px 0 0 var(--positive,#34d399);background:rgba(52,211,153,.05)}
+table.mp-conc td{vertical-align:middle;padding:7px 10px}
+table.mp-conc th{white-space:nowrap}
+table.mp-conc select,table.mp-conc input[type=text]{max-width:100%}
+
+/* ---------- Filtros / toolbar ---------- */
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:12px 16px;border-bottom:1px solid var(--divider);background:var(--bg-sunken)}
+.toolbar .grow{margin-left:auto}
+.toolbar .summary{font-size:var(--fs-xs);color:var(--text-tertiary);font-variant-numeric:tabular-nums}
+.toolbar .summary b{color:var(--text-primary);font-weight:600}
+select,input[type=text],input[type=date],input[type=number],input[type=password]{height:34px;background:var(--bg-inset);border:1px solid var(--border);border-radius:var(--r-sm);color:var(--text-primary);font-size:var(--fs-sm);padding:0 11px;font-family:inherit;transition:border-color var(--t-fast) var(--ease),box-shadow var(--t-fast) var(--ease),background var(--t-fast)}
+select{cursor:pointer;appearance:none;padding-right:30px;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236c7077' stroke-width='2.2'><path d='M6 9l6 6 6-6'/></svg>");background-repeat:no-repeat;background-position:right 10px center}
+input::placeholder{color:var(--text-quaternary)}
+select:hover,input:hover{border-color:var(--border-strong)}
+select:focus,input:focus{outline:none;border-color:var(--accent-dim);box-shadow:var(--ring-accent);background:var(--bg-sunken)}
+
+/* segmented control */
+.seg{display:inline-flex;padding:3px;gap:2px;background:var(--bg-inset);border:1px solid var(--border-subtle);border-radius:var(--r-md)}
+.seg button{height:28px;padding:0 13px;border:none;background:transparent;color:var(--text-tertiary);font-size:var(--fs-xs);font-weight:600;border-radius:var(--r-sm);cursor:pointer;font-family:inherit;transition:background var(--t-fast) var(--ease),color var(--t-fast) var(--ease)}
+.seg button:hover{color:var(--text-secondary)}
+.seg button.active{background:var(--bg-surface-3);color:var(--text-primary);box-shadow:var(--shadow-sm)}
+
+/* paginacion */
+.pagination{display:flex;align-items:center;justify-content:space-between;padding:11px 16px;font-size:var(--fs-xs);color:var(--text-tertiary);border-top:1px solid var(--divider)}
+.pag-btn{height:28px;padding:0 11px;background:var(--bg-surface-2);border:1px solid var(--border);color:var(--text-secondary);border-radius:var(--r-xs);cursor:pointer;font-size:var(--fs-xs);transition:background var(--t-fast),color var(--t-fast)}
+.pag-btn:hover:not(:disabled){background:var(--bg-surface-3);color:var(--text-primary)}
+.pag-btn:disabled{opacity:.35;cursor:default}
+
+/* ---------- Acordeon por categoria ---------- */
+.accordion{display:flex;flex-direction:column;gap:8px}
+.acc-group{background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--r-md);overflow:hidden;transition:border-color var(--t) var(--ease)}
+.acc-group.open{border-color:var(--border)}
+.acc-head{display:flex;align-items:center;gap:14px;padding:14px 18px;cursor:pointer;user-select:none;transition:background var(--t-fast) var(--ease)}
+.acc-head:hover{background:var(--glass)}
+.acc-chevron{font-size:13px;color:var(--text-tertiary);transition:transform var(--t) var(--ease),color var(--t-fast);width:12px;flex:none}
+.acc-group.open .acc-chevron{transform:rotate(90deg);color:var(--accent)}
+.acc-cat-dot{width:9px;height:9px;border-radius:3px;flex:none}
+.acc-title{font-weight:500;color:var(--text-primary);font-size:var(--fs-body)}
+.acc-count{font-size:var(--fs-xs);color:var(--text-tertiary);background:var(--bg-surface-2);padding:2px 8px;border-radius:var(--r-pill);font-variant-numeric:tabular-nums}
+.acc-bar{width:120px;height:5px;border-radius:var(--r-pill);background:var(--bg-inset);overflow:hidden;flex:none;margin-left:auto}
+.acc-bar > i{display:block;height:100%;border-radius:inherit;background:var(--accent);box-shadow:0 0 8px var(--accent-glow);transition:width var(--t-slow) var(--ease-out)}
+.acc-share{font-size:var(--fs-xs);color:var(--text-tertiary);min-width:42px;text-align:right;font-variant-numeric:tabular-nums}
+.acc-amount{font-family:var(--font-num);font-variant-numeric:tabular-nums;font-weight:600;font-size:var(--fs-body);color:var(--text-primary);min-width:96px;text-align:right}
+.acc-panel{max-height:0;overflow:hidden;transition:max-height var(--t-slow) var(--ease)}
+.acc-group.open .acc-panel{max-height:460px}
+.acc-panel-inner{max-height:420px;overflow-y:auto;border-top:1px solid var(--divider);background:var(--bg-sunken)}
+.acc-txn{display:flex;align-items:center;gap:12px;padding:9px 18px 9px 44px;border-bottom:1px solid var(--divider);font-size:var(--fs-sm);transition:background var(--t-fast)}
+.acc-txn:hover{background:var(--glass)}
+.acc-txn:last-child{border-bottom:none}
+.acc-txn .date{color:var(--text-tertiary);font-variant-numeric:tabular-nums;width:84px;flex:none;font-family:var(--font-num)}
+.acc-txn .desc{color:var(--text-secondary);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.acc-txn .amt{font-family:var(--font-num);font-variant-numeric:tabular-nums;color:var(--text-primary);font-weight:500}
+.acc-txn .acts{display:flex;gap:4px;flex:none}
+
+/* ---------- Vista por GRUPOS (macro -> categoria -> transaccion) ---------- */
+.mgrp{background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--r-md);overflow:hidden;transition:border-color var(--t)}
+.mgrp+.mgrp{margin-top:8px}
+.mgrp.open{border-color:var(--border)}
+.mhead{display:flex;align-items:center;gap:13px;padding:14px 18px;cursor:pointer;user-select:none;transition:background var(--t-fast)}
+.mhead:hover{background:var(--glass)}
+.mchev{font-size:13px;color:var(--text-tertiary);width:12px;flex:none;transition:transform var(--t) var(--ease),color var(--t-fast)}
+.mgrp.open>.mhead .mchev{transform:rotate(90deg);color:var(--accent)}
+.mdot{width:11px;height:11px;border-radius:3px;flex:none}
+.mtitle{font-weight:600;color:var(--text-primary);font-size:var(--fs-body)}
+.mcount{font-size:var(--fs-xs);color:var(--text-tertiary);background:var(--bg-surface-2);padding:2px 9px;border-radius:var(--r-pill);white-space:nowrap}
+.mbar{width:130px;height:6px;border-radius:var(--r-pill);background:var(--bg-inset);overflow:hidden;flex:none;margin-left:auto}
+.mbar>i{display:block;height:100%;background:linear-gradient(90deg,var(--accent-dim),var(--accent));box-shadow:0 0 8px var(--accent-glow);transition:width var(--t-slow) var(--ease-out)}
+.mshare{font-size:var(--fs-xs);color:var(--text-tertiary);min-width:38px;text-align:right;font-variant-numeric:tabular-nums}
+.mamount{font-family:var(--font-num);font-weight:700;color:var(--text-primary);min-width:104px;text-align:right;font-variant-numeric:tabular-nums}
+.mpanel{display:grid;grid-template-rows:0fr;transition:grid-template-rows var(--t-slow) var(--ease);background:var(--bg-sunken)}
+.mgrp.open>.mpanel{grid-template-rows:1fr}
+.mpanel>.mpanel-in{overflow:hidden;min-height:0}
+.scat{border-top:1px solid var(--divider)}
+.shead{display:flex;align-items:center;gap:11px;padding:10px 18px 10px 42px;cursor:pointer;transition:background var(--t-fast)}
+.shead:hover{background:var(--glass)}
+.schev{font-size:11px;color:var(--text-quaternary);width:10px;flex:none;transition:transform var(--t) var(--ease)}
+.scat.open>.shead .schev{transform:rotate(90deg);color:var(--accent)}
+.sdot{width:7px;height:7px;border-radius:2px;flex:none}
+.stitle{font-weight:500;color:var(--text-secondary);font-size:var(--fs-sm)}
+.scount{font-size:11px;color:var(--text-quaternary);font-variant-numeric:tabular-nums}
+.sbar{width:90px;height:4px;border-radius:var(--r-pill);background:var(--bg-inset);overflow:hidden;flex:none;margin-left:auto}
+.sbar>i{display:block;height:100%;background:var(--text-quaternary)}
+.samount{font-family:var(--font-num);color:var(--text-primary);font-weight:500;min-width:96px;text-align:right;font-variant-numeric:tabular-nums;font-size:var(--fs-sm)}
+.spanel{display:grid;grid-template-rows:0fr;transition:grid-template-rows var(--t) var(--ease)}
+.scat.open>.spanel{grid-template-rows:1fr}
+.spanel>.spanel-in{overflow:hidden;min-height:0}
+.stxn{display:flex;align-items:center;gap:12px;padding:8px 18px 8px 64px;border-top:1px solid var(--divider);font-size:var(--fs-sm);transition:background var(--t-fast)}
+.stxn:hover{background:var(--glass)}
+.stxn .date{color:var(--text-tertiary);font-variant-numeric:tabular-nums;width:80px;flex:none;font-family:var(--font-num)}
+.stxn .desc{color:var(--text-secondary);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stxn .amt{font-family:var(--font-num);color:var(--text-primary);font-weight:500;font-variant-numeric:tabular-nums}
+/* modal organizar */
+.org-row{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--divider)}
+.org-row .oc{flex:1;font-size:var(--fs-sm);color:var(--text-secondary)}
+
+/* ---------- Ranking de meses ---------- */
+.ranking{display:flex;flex-direction:column;padding:6px 0}
+.rank-row{display:grid;grid-template-columns:24px 96px 1fr 118px;align-items:center;gap:14px;padding:10px 18px;transition:background var(--t-fast) var(--ease);cursor:pointer}
+.rank-row:hover{background:var(--glass)}
+.rank-row.sel{background:var(--accent-softer)}
+.rank-pos{font-size:var(--fs-xs);font-weight:700;color:var(--text-quaternary);font-variant-numeric:tabular-nums;text-align:center}
+.rank-row.top .rank-pos{color:var(--accent)}
+.rank-month{font-size:var(--fs-sm);color:var(--text-primary);font-weight:500}
+.rank-track{height:9px;border-radius:var(--r-pill);background:var(--bg-inset);overflow:hidden}
+.rank-fill{height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--accent-dim),var(--accent));box-shadow:0 0 10px var(--accent-glow);transition:width var(--t-slow) var(--ease-out)}
+.rank-row:not(.top) .rank-fill{background:var(--text-quaternary);box-shadow:none}
+.rank-val{text-align:right;font-family:var(--font-num);font-variant-numeric:tabular-nums;font-size:var(--fs-sm);color:var(--text-secondary)}
+.rank-row.top .rank-val{color:var(--text-primary);font-weight:600}
+.rank-cnt{font-size:10px;color:var(--text-quaternary);margin-left:6px}
+
+/* ---------- Pills ---------- */
+.pill{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px;border-radius:var(--r-pill);font-size:var(--fs-label);font-weight:600;letter-spacing:0.03em;white-space:nowrap;border:1px solid transparent;line-height:1}
+.pill .dot{width:5px;height:5px;border-radius:50%;background:currentColor}
+.pill-fijo{color:#9db8f5;background:var(--info-soft);border-color:rgba(122,162,247,0.22)}
+.pill-variable{color:var(--warning);background:var(--warning-soft);border-color:rgba(246,193,119,0.22)}
+.pill-transfer{color:#cbbcfd;background:rgba(196,181,253,0.12);border-color:rgba(196,181,253,0.22)}
+.pill-reembolso{color:var(--positive-ink);background:var(--positive-soft);border-color:var(--accent-line)}
+.pill-neg{color:var(--negative-ink);background:var(--negative-soft);border-color:rgba(251,113,133,0.24)}
+.pill-ghost{color:var(--text-tertiary);background:var(--bg-surface-2);border-color:var(--border-subtle)}
+.catpill{display:inline-block;padding:2px 9px;border-radius:var(--r-pill);font-size:11px;font-weight:500;background:var(--bg-surface-2);color:var(--text-secondary);border:1px solid var(--border-subtle)}
+
+/* ---------- Botones ---------- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:34px;padding:0 15px;border-radius:var(--r-sm);font-size:var(--fs-sm);font-weight:600;letter-spacing:-0.01em;cursor:pointer;border:1px solid transparent;transition:all var(--t-fast) var(--ease);white-space:nowrap;font-family:inherit}
+.btn:active{transform:scale(.975)}
+.btn-primary{background:linear-gradient(180deg,var(--accent-bright),var(--accent));color:var(--text-on-accent);box-shadow:0 0 0 1px var(--accent-line),0 6px 18px -8px var(--accent-glow)}
+.btn-primary:hover{background:var(--accent-bright);transform:translateY(-1px)}
+.btn-secondary{background:var(--bg-surface-2);color:var(--text-primary);border-color:var(--border)}
+.btn-secondary:hover{background:var(--bg-surface-3);border-color:var(--border-strong)}
+.btn-ghost{background:transparent;color:var(--text-secondary)}
+.btn-ghost:hover{background:var(--glass-strong);color:var(--text-primary)}
+.btn-danger{background:var(--negative-soft);color:var(--negative-ink);border-color:rgba(251,113,133,0.3)}
+.btn-danger:hover{background:rgba(251,113,133,0.18);border-color:rgba(251,113,133,0.45)}
+.btn-sm{height:30px;padding:0 11px;font-size:var(--fs-xs)}
+.btn-icon{width:30px;height:30px;padding:0}
+.btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
+
+/* ---------- Modal ---------- */
+.overlay{position:fixed;inset:0;z-index:200;background:rgba(4,5,7,.72);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;padding:24px;animation:overlayIn var(--t) var(--ease) both}
+@keyframes overlayIn{from{opacity:0}to{opacity:1}}
+.modal{width:460px;max-width:92vw;max-height:88vh;overflow-y:auto;background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--r-xl);box-shadow:var(--shadow-lg);animation:modalIn var(--t-slow) var(--ease-out) both}
+@keyframes modalIn{from{opacity:0;transform:translateY(14px) scale(.98)}to{opacity:1;transform:none}}
+.modal > h3{font-size:var(--fs-h2);font-weight:600;padding:18px 20px;border-bottom:1px solid var(--divider)}
+.modal-inner{padding:18px 20px}
+.form-row{margin-bottom:14px}
+.form-row label{display:block;font-size:var(--fs-xs);font-weight:600;color:var(--text-secondary);margin-bottom:6px}
+.form-row input,.form-row select,.form-row textarea{width:100%}
+.form-row textarea{height:auto;min-height:70px;background:var(--bg-inset);border:1px solid var(--border);border-radius:var(--r-sm);color:var(--text-primary);padding:9px 11px;font-family:inherit;font-size:var(--fs-sm);resize:vertical;line-height:1.5}
+.modal-btns{display:flex;gap:9px;justify-content:flex-end;padding:16px 20px;border-top:1px solid var(--divider);background:var(--bg-sunken);border-radius:0 0 var(--r-xl) var(--r-xl)}
+
+/* ---------- Alertas / YoY / upload / misc ---------- */
+.alert{display:flex;gap:10px;align-items:flex-start;padding:11px 14px;border-radius:var(--r-md);font-size:var(--fs-sm);margin-bottom:14px;border:1px solid transparent;line-height:1.5}
+.alert-yellow{background:var(--warning-soft);border-color:rgba(246,193,119,.28);color:var(--warning)}
+.alert-green{background:var(--positive-soft);border-color:var(--accent-line);color:var(--positive-ink)}
+.alert-red{background:var(--negative-soft);border-color:rgba(251,113,133,.3);color:var(--negative-ink)}
+.yoy-table td,.yoy-table th{text-align:right;font-variant-numeric:tabular-nums}
+.yoy-table td:first-child,.yoy-table th:first-child{text-align:left}
+.cell-pos-hi{background:var(--positive-soft);color:var(--positive-ink)}
+.cell-pos{background:var(--accent-softer);color:#a7f3d0}
+.cell-neg{background:var(--negative-soft);color:var(--negative-ink)}
+.cell-nil{color:var(--text-quaternary)}
+.upload-zone{border:1.5px dashed var(--border-strong);border-radius:var(--r-lg);padding:42px;text-align:center;cursor:pointer;color:var(--text-tertiary);background:var(--bg-surface);transition:border-color var(--t),background var(--t),color var(--t)}
+.upload-zone:hover,.upload-zone.drag{border-color:var(--accent-dim);background:var(--accent-softer);color:var(--text-secondary)}
+.empty{text-align:center;padding:52px 20px;color:var(--text-tertiary)}
+.empty h3{margin-bottom:6px;font-size:var(--fs-body);color:var(--text-secondary);font-weight:600}
+.spinner{display:inline-block;width:16px;height:16px;border-radius:50%;border:2px solid var(--border-strong);border-top-color:var(--accent);animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.notes-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
+.note-card{background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--r-md);padding:12px}
+.note-card .mlabel{font-size:11px;color:var(--text-tertiary);margin-bottom:6px;font-weight:600}
+.note-card textarea{width:100%;height:48px;resize:none;background:var(--bg-inset);border:1px solid var(--border);border-radius:var(--r-sm);padding:6px 9px;color:var(--text-primary);font-size:11px;font-family:inherit}
+
+/* ---------- Scrollbar ---------- */
+::-webkit-scrollbar{width:11px;height:11px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:var(--r-pill);border:3px solid var(--bg-base);background-clip:padding-box}
+::-webkit-scrollbar-thumb:hover{background:var(--border-emphasis);background-clip:padding-box}
+*{scrollbar-width:thin;scrollbar-color:var(--border-strong) transparent}
+
+/* ---------- Microinteracciones ---------- */
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.fade-up{animation:fadeUp var(--t-slow) var(--ease-out) both}
+.mt8{margin-top:8px}.mt16{margin-top:16px}.mt24{margin-top:24px}
+.muted{color:var(--text-tertiary)}
+
+/* ---------- Impresión / PDF del Dashboard ---------- */
+@media print {
+  @page { margin: 12mm; }
+  html,body{height:auto;overflow:visible;background:#fff}
+  .sidebar,.topbar,.lock-overlay,.month-filter,.lock-actions{display:none!important}
+  .app-shell{display:block;height:auto;overflow:visible}
+  .main{overflow:visible;display:block}
+  .content{overflow:visible;padding:0}
+  .card,.kpi,.chart-card,.table-wrap{break-inside:avoid;box-shadow:none}
+  .fade-up{animation:none}
+}
+</style>
+</head>
+<body x-data="app()" x-init="init()" x-cloak>
+
+<!-- ═══════════════ PANTALLA DE CANDADO ═══════════════ -->
+<div class="lock-overlay" x-show="!unlocked" x-cloak>
+  <div class="lock-card">
+    <div class="lock-mark">$</div>
+    <div class="lock-title">Control de Gastos</div>
+    <div class="lock-sub">Marco Muñoz · acceso protegido</div>
+
+    <div x-show="gate.mode==='loading'" style="padding:20px 0"><span class="spinner"></span></div>
+
+    <!-- Primer uso: crear contraseña -->
+    <form x-show="gate.mode==='crear'" class="lock-form" @submit.prevent="onCrear()" autocomplete="off">
+      <div class="lock-warn">Esta contraseña <b>cifra tus datos</b>. Si la olvidas no hay forma de recuperarlos. Usa una frase que recuerdes.</div>
+      <div>
+        <label>Crear contraseña</label>
+        <input class="lock-input" type="password" x-model="gate.pwd" @input="_calcFuerza()" autocomplete="new-password" autocapitalize="off" spellcheck="false" placeholder="ej: caballo verde lunes rápido">
+        <div class="strength" x-show="gate.pwd">
+          <div class="strength-track"><div class="strength-fill" :style="`width:${gate.fuerza.pct}%;background:${gate.fuerza.color}`"></div></div>
+          <div class="strength-label" :style="`color:${gate.fuerza.color}`" x-text="gate.fuerza.label"></div>
+        </div>
+      </div>
+      <div>
+        <label>Repetir contraseña</label>
+        <input class="lock-input" type="password" x-model="gate.pwd2" autocomplete="new-password" autocapitalize="off" spellcheck="false">
+      </div>
+      <div class="lock-error" x-show="gate.error" x-text="gate.error"></div>
+      <button class="btn btn-primary lock-btn" type="submit" :disabled="gate.pwd.length<10 || gate.fuerza.score<2 || gate.pwd!==gate.pwd2 || cargando">Crear y entrar</button>
+      <div class="lock-note">Consejo: una frase de 4 palabras es más segura y fácil de recordar que “Marco2025!”.</div>
+    </form>
+
+    <!-- Equipo nuevo / primer uso: una sola contraseña (restaura de la nube o crea cuenta) -->
+    <form x-show="gate.mode==='entrar'" class="lock-form" @submit.prevent="onEntrar()" autocomplete="off">
+      <div class="lock-warn" style="background:rgba(52,211,153,.08);border-color:rgba(52,211,153,.3)">Ingresa tu contraseña. Si ya usas la app en otro equipo, tus datos se <b>sincronizarán aquí</b>; si es tu primera vez, crearás tu cuenta.</div>
+      <div>
+        <label>Contraseña</label>
+        <input class="lock-input" type="password" x-model="gate.pwd" autocomplete="current-password" autocapitalize="off" spellcheck="false" placeholder="Tu contraseña">
+      </div>
+      <div class="lock-error" x-show="gate.error" x-text="gate.error"></div>
+      <button class="btn btn-primary lock-btn" type="submit" :disabled="cargando || !gate.pwd"><span x-show="!cargando">Entrar</span><span x-show="cargando">Conectando…</span></button>
+      <div class="lock-note">Se conecta a tu casillero cifrado en la nube. Nadie puede leer tus datos sin esta contraseña.</div>
+    </form>
+
+    <!-- Reingreso: pedir contraseña -->
+    <form x-show="gate.mode==='ingresar'" class="lock-form" @submit.prevent="onIngresar()" autocomplete="off">
+      <div>
+        <label>Contraseña</label>
+        <input class="lock-input" type="password" x-model="gate.pwd" autocomplete="current-password" autocapitalize="off" spellcheck="false" placeholder="Ingresa tu contraseña">
+      </div>
+      <div class="lock-error" x-show="gate.error" x-text="gate.error"></div>
+      <button class="btn btn-primary lock-btn" type="submit" :disabled="gate.bloqueadoHasta>0 || cargando">
+        <span x-show="gate.bloqueadoHasta<=0">Desbloquear</span>
+        <span x-show="gate.bloqueadoHasta>0" x-text="'Espera '+gate.espera+' s'"></span>
+      </button>
+      <div class="lock-note">Tus datos están cifrados en este equipo. Nadie puede verlos sin esta contraseña.</div>
+    </form>
+  </div>
+</div>
+
+<!-- ═══════════════ APP (solo tras desbloquear) ═══════════════ -->
+<template x-if="unlocked">
+<div class="app-shell">
+
+<!-- ═══════════════ SIDEBAR ═══════════════ -->
+<nav class="sidebar">
+  <div class="brand">
+    <div class="brand-mark">$</div>
+    <div>
+      <div class="brand-name">Control de Gastos</div>
+      <div class="brand-sub">Marco Muñoz · <span x-text="anoActivo"></span></div>
+    </div>
+  </div>
+  <div class="sb-nav">
+    <div class="nav-section">General</div>
+    <template x-for="item in navItems" :key="item.id">
+      <div class="nav-item" :class="{active: view===item.id}" @click="navTo(item.id)">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path :d="item.icon" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="lbl" x-text="item.label"></span>
+        <span class="nav-badge" x-show="item.id==='importar' && mpPendCount>0" x-text="mpPendCount"></span>
+      </div>
+    </template>
+  </div>
+  <div class="sidebar-footer">
+    <div class="status-row"><span class="muted">Datos al</span><span class="val" x-text="ultimaSync"></span></div>
+    <div class="status-row" style="cursor:pointer" @click="sincronizarAhora()" title="Sincronizar ahora con la nube">
+      <span class="muted">☁ Nube</span>
+      <span class="val" :style="syncEstado==='sin conexión'?'color:var(--warning)':(syncEstado==='al día'||syncEstado==='actualizado'?'color:var(--accent-bright)':'')" x-text="syncEstado"></span>
+    </div>
+    <div class="status-row"><span class="muted">Versión</span><span class="val" style="color:var(--accent-bright)">nube v8 · 21-jun</span></div>
+    <div class="status-row">
+      <span><span x-show="!cargando" class="status-dot"></span><span x-show="cargando" class="spinner" style="width:8px;height:8px;vertical-align:middle;margin-right:7px"></span><span x-text="cargando ? 'Cargando…' : 'En línea · cifrado'"></span></span>
+      <span class="val" x-text="totalRegistros+' reg.'"></span>
+    </div>
+    <div class="lock-actions">
+      <button class="btn btn-secondary btn-sm" style="flex:1" @click="bloquear()" title="Bloquear y pedir contraseña">🔒 Bloquear</button>
+      <button class="btn btn-secondary btn-sm btn-icon" @click="exportarRespaldoApp()" title="Exportar respaldo cifrado">⬇</button>
+      <button class="btn btn-secondary btn-sm btn-icon" @click="$refs.bkFile.click()" title="Importar respaldo cifrado">⬆</button>
+      <input type="file" x-ref="bkFile" accept=".enc" style="display:none" @change="importarRespaldoApp($event)">
+    </div>
+  </div>
+</nav>
+
+<!-- ═══════════════ MAIN ═══════════════ -->
+<div class="main">
+
+  <div class="topbar">
+    <div>
+      <h1 x-text="navItems.find(n=>n.id===view)?.label || 'Dashboard'"></h1>
+      <div class="crumb" x-text="crumb"></div>
+    </div>
+    <div class="topbar-actions">
+      <select x-model="anoActivo" @change="onAnoChange()">
+        <option>2025</option>
+        <option>2026</option>
+      </select>
+      <button class="btn btn-secondary btn-sm" @click="exportarPDF()" x-show="view==='dashboard'" title="Exportar el Dashboard a PDF (foto del momento)">🖨 PDF</button>
+      <button class="btn btn-secondary btn-sm" @click="exportarExcel()" title="Exportar todo a Excel (Egresos e Ingresos)">⬇ Excel</button>
+      <button class="btn btn-secondary btn-sm" @click="exportarCSV()" x-show="view==='egresos'||view==='ingresos'" title="Exportar la vista actual a CSV">↓ CSV</button>
+      <button class="btn btn-primary btn-sm" x-show="view==='egresos'" @click="abrirModalEgreso(null)">+ Egreso</button>
+      <button class="btn btn-primary btn-sm" x-show="view==='ingresos'" @click="abrirModalIngreso(null)">+ Ingreso</button>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- ───────── DASHBOARD ───────── -->
+    <div x-show="view==='dashboard'" class="fade-up">
+
+      <!-- Aviso: meses en revisión (excluidos del resumen hasta categorizar) -->
+      <div class="alert alert-yellow" x-show="hayRevision" style="margin-bottom:16px">
+        <span>📋</span><span><b x-text="mesesRevisionLabel"></b> en revisión — <b x-text="mpPendCount"></b> transacciones por categorizar. <b>No se incluye en el resumen</b> hasta que termines. <a @click="navTo('importar')" style="color:var(--accent);cursor:pointer;font-weight:600">Ir a categorizar →</a></span>
+      </div>
+
+      <!-- filtro de meses: multiseleccion, orden ascendente (antiguo -> reciente) -->
+      <div class="month-filter" x-show="mesesAsc.length">
+        <span class="mf-label">Meses</span>
+        <template x-for="m in mesesAsc" :key="m">
+          <button class="chip" :class="{active: dashMeses.includes(m)}" @click="toggleMes(m)" x-text="mesCorto(m)"></button>
+        </template>
+        <span class="sep"></span>
+        <button class="chip-action" @click="selectAllMeses()">Todos</button>
+        <button class="chip-action" @click="soloUltimoMes()">Último</button>
+        <span style="flex:1"></span>
+        <span class="muted" style="font-size:var(--fs-xs)" x-text="dashPeriodoLabel"></span>
+      </div>
+      <div x-show="!mesesAsc.length" class="muted" style="margin-bottom:18px;font-size:var(--fs-xs)">Sin datos para <span x-text="anoActivo"></span></div>
+
+      <!-- KPIs -->
+      <div class="kpi-grid">
+        <template x-for="c in dashCards" :key="c.label">
+          <div class="kpi" :class="c.cls">
+            <div class="kpi-label" x-text="c.label"></div>
+            <div class="kpi-value" :class="c.valCls" x-text="clp(c.val)"></div>
+            <div class="kpi-sub">
+              <template x-if="c.d">
+                <span class="kpi-delta" :class="c.d.good?'up':'down'"><span x-text="c.d.arrow"></span><span x-text="Math.abs(c.d.pct).toFixed(0)+'%'"></span></span>
+              </template>
+              <span x-text="c.sub"></span>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- Charts -->
+      <div class="section-title">Ingresos vs Egresos · <span x-text="anoActivo"></span></div>
+      <div class="charts-row">
+        <div class="chart-card">
+          <div class="card-head"><h3>Flujo mensual</h3><span class="sub" x-text="anoActivo"></span></div>
+          <div class="chart-body"><canvas x-ref="chartBar" height="190"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="card-head"><h3>Top categorías</h3><span class="sub" x-text="dashPeriodoLabel"></span></div>
+          <div class="chart-body"><canvas x-ref="chartTop" height="190"></canvas></div>
+        </div>
+      </div>
+
+      <!-- Ranking de meses por gasto -->
+      <div class="section-title">¿En qué meses gastaste más?</div>
+      <div class="card">
+        <div class="card-head">
+          <div><h3>Ranking de gasto mensual</h3><span class="sub">Egresos totales por mes · <span x-text="anoActivo"></span> · clic en un mes para verlo arriba</span></div>
+          <div class="seg">
+            <button :class="{active: rankBy==='gasto'}" @click="rankBy='gasto'">Mayor gasto</button>
+            <button :class="{active: rankBy==='mes'}" @click="rankBy='mes'">Cronológico</button>
+          </div>
+        </div>
+        <div class="ranking">
+          <template x-for="(r,idx) in rankingMeses" :key="r.ym">
+            <div class="rank-row" :class="{top: rankBy==='gasto' && idx===0, sel: dashMeses.includes(r.ym)}" @click="setDashMonth(r.ym)">
+              <div class="rank-pos" x-text="r.pos"></div>
+              <div class="rank-month" x-text="r.label"></div>
+              <div class="rank-track"><div class="rank-fill" :style="`width:${r.bar}%`"></div></div>
+              <div class="rank-val"><span x-text="clp(r.total)"></span><span class="rank-cnt" x-text="r.count+'·'"></span></div>
+            </div>
+          </template>
+          <div x-show="!rankingMeses.length" class="empty"><h3>Sin egresos en <span x-text="anoActivo"></span></h3></div>
+        </div>
+      </div>
+
+      <!-- YoY mini -->
+      <div class="section-title">Utilidad mensual · Year over Year</div>
+      <div class="table-wrap">
+        <table class="data yoy-table">
+          <thead><tr><th>Mes</th><th class="num">2025</th><th class="num">2026</th><th class="num">Δ</th></tr></thead>
+          <tbody>
+            <template x-for="row in yoyRows" :key="row.mes">
+              <tr>
+                <td class="strong" x-text="row.mes"></td>
+                <td class="num" :class="yoyClass(row.ut_2025)" x-text="row.ut_2025!=null?clp(row.ut_2025):'—'"></td>
+                <td class="num" :class="yoyClass(row.ut_2026)" x-text="row.ut_2026!=null?clp(row.ut_2026):'—'"></td>
+                <td class="num" :class="yoyClass(row.delta)" x-text="row.delta!=null?clp(row.delta):'—'"></td>
+              </tr>
+            </template>
+          </tbody>
+          <tfoot>
+            <tr style="font-weight:700">
+              <td class="strong">TOTAL</td>
+              <td class="num" :class="yoyClass(totalYoy2025)" x-text="clp(totalYoy2025)"></td>
+              <td class="num" :class="yoyClass(totalYoy2026)" x-text="clp(totalYoy2026)"></td>
+              <td class="num"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+
+    <!-- ───────── EGRESOS ───────── -->
+    <div x-show="view==='egresos'" x-cloak class="fade-up">
+      <div class="table-wrap">
+        <div class="toolbar">
+          <select x-model="fE.ano" @change="fE.meses=[];fE.pag=1">
+            <option value="">Todos los años</option>
+            <option>2025</option><option>2026</option>
+          </select>
+          <select x-model="fE.cat" @change="fE.pag=1" style="max-width:190px">
+            <option value="">Todas las categorías</option>
+            <template x-for="c in categoriasEgreso" :key="c"><option :value="c" x-text="c"></option></template>
+          </select>
+          <select x-model="fE.tipo" @change="fE.pag=1">
+            <option value="">Fijo + Variable</option>
+            <option value="fijo">Solo Fijo</option>
+            <option value="variable">Solo Variable</option>
+          </select>
+          <input type="text" placeholder="Buscar…" x-model="fE.q" @input="fE.pag=1" style="width:150px">
+          <div class="grow seg">
+            <button :class="{active: egVista==='macro'}" @click="egVista='macro'">Grupos</button>
+            <button :class="{active: egVista==='categoria'}" @click="egVista='categoria'">Categorías</button>
+            <button :class="{active: egVista==='lista'}" @click="egVista='lista'">Detalle</button>
+          </div>
+        </div>
+
+        <!-- filtro de meses por chips (igual que el dashboard) -->
+        <div class="month-filter" style="margin:0;border:none;border-radius:0;border-bottom:1px solid var(--divider);box-shadow:none;background:var(--bg-sunken)" x-show="egMesesAsc.length">
+          <span class="mf-label">Meses</span>
+          <button class="chip" :class="{active: !fE.meses.length}" @click="clearMesesE()">Todos</button>
+          <template x-for="m in egMesesAsc" :key="m">
+            <button class="chip" :class="{active: fE.meses.includes(m)}" @click="toggleMesE(m)" x-text="mesNombreMM(m)"></button>
+          </template>
+        </div>
+
+        <!-- resumen + orden -->
+        <div class="toolbar" style="background:transparent;border-bottom:1px solid var(--divider)">
+          <span class="summary">Total <b x-text="clp(egResumen.total)"></b> · <b x-text="egResumen.mov"></b> movimientos · <b x-text="egResumen.cats"></b> categorías · Fijo <b x-text="clp(egResumen.fijo)"></b> · Variable <b x-text="clp(egResumen.vari)"></b></span>
+          <div class="grow"></div>
+          <button class="btn btn-secondary btn-sm" x-show="egVista==='macro'" @click="abrirModalMacros()" style="margin-right:8px">⚙ Organizar grupos</button>
+          <div class="seg" x-show="egVista!=='lista'">
+            <span class="mf-label" style="align-self:center;margin:0 6px 0 2px">Ordenar</span>
+            <button :class="{active: fE.ordenCat==='monto'}" @click="fE.ordenCat='monto'">Monto</button>
+            <button :class="{active: fE.ordenCat==='alfa'}" @click="fE.ordenCat='alfa'">A–Z</button>
+            <button :class="{active: fE.ordenCat==='cantidad'}" @click="fE.ordenCat='cantidad'">Cantidad</button>
+          </div>
+        </div>
+
+        <!-- VISTA POR GRUPOS (macro -> categoria -> transaccion) -->
+        <div x-show="egVista==='macro'" style="padding:14px 16px">
+          <template x-for="M in egresosPorMacro" :key="M.macro">
+            <div class="mgrp" :class="{open: expandedMacros[M.macro]}">
+              <div class="mhead" @click="toggleMacro(M.macro)">
+                <span class="mchev">▶</span>
+                <span class="mdot" :style="`background:${M.color}`"></span>
+                <span class="mtitle" x-text="M.macro"></span>
+                <span class="mcount" x-text="M.catCount+' cat · '+M.count+' mov'"></span>
+                <span class="mshare" x-text="M.pct.toFixed(0)+'%'"></span>
+                <span class="mbar"><i :style="`width:${M.bar}%`"></i></span>
+                <span class="mamount" x-text="clp(M.total)"></span>
+              </div>
+              <div class="mpanel"><div class="mpanel-in">
+                <template x-for="g in M.cats" :key="g.cat">
+                  <div class="scat" :class="{open: expandedCats[g.cat]}">
+                    <div class="shead" @click="toggleCat(g.cat)">
+                      <span class="schev">▶</span>
+                      <span class="sdot" :style="`background:${g.color}`"></span>
+                      <span class="stitle" x-text="g.cat"></span>
+                      <span class="scount" x-text="g.count+' mov'"></span>
+                      <span class="sbar"><i :style="`width:${g.barInMacro}%`"></i></span>
+                      <span class="samount" x-text="clp(g.total)"></span>
+                    </div>
+                    <div class="spanel"><div class="spanel-in">
+                      <template x-for="e in g.items" :key="e.id">
+                        <div class="stxn">
+                          <span class="date" x-text="fmtFecha(e.fecha)"></span>
+                          <span class="desc" x-text="e.detalle || e.categoria"></span>
+                          <span class="pill" :class="e.es_transferencia?'pill-transfer':e.tipo==='fijo'?'pill-fijo':'pill-variable'"><span class="dot"></span><span x-text="e.es_transferencia?'Transf.':e.tipo==='fijo'?'Fijo':'Variable'"></span></span>
+                          <span class="amt" x-text="clp(e.total)"></span>
+                          <span style="display:flex;gap:4px;flex:none">
+                            <button class="btn btn-secondary btn-icon btn-sm" @click="abrirModalEgreso(e)">✎</button>
+                            <button class="btn btn-danger btn-icon btn-sm" @click="eliminarEgreso(e.id)">✕</button>
+                          </span>
+                        </div>
+                      </template>
+                    </div></div>
+                  </div>
+                </template>
+              </div></div>
+            </div>
+          </template>
+          <div x-show="!egresosPorMacro.length" class="empty"><h3>Sin egresos</h3><div>No hay movimientos que coincidan con los filtros</div></div>
+        </div>
+
+        <!-- VISTA POR CATEGORIA (acordeon) -->
+        <div x-show="egVista==='categoria'" style="padding:14px 16px">
+          <div class="accordion">
+            <template x-for="g in egresosPorCategoria" :key="g.cat">
+              <div class="acc-group" :class="{open: expandedCats[g.cat]}">
+                <div class="acc-head" @click="toggleCat(g.cat)">
+                  <span class="acc-chevron">▶</span>
+                  <span class="acc-cat-dot" :style="`background:${g.color}`"></span>
+                  <span class="acc-title" x-text="g.cat"></span>
+                  <span class="acc-count" x-text="g.count"></span>
+                  <span class="acc-share" x-text="g.pct.toFixed(0)+'%'"></span>
+                  <span class="acc-bar"><i :style="`width:${g.bar}%`"></i></span>
+                  <span class="acc-amount" x-text="clp(g.total)"></span>
+                </div>
+                <div class="acc-panel">
+                  <div class="acc-panel-inner">
+                    <template x-for="e in g.items" :key="e.id">
+                      <div class="acc-txn">
+                        <span class="date" x-text="fmtFecha(e.fecha)"></span>
+                        <span class="desc" x-text="e.detalle || e.categoria"></span>
+                        <span class="pill" :class="e.es_transferencia?'pill-transfer':e.tipo==='fijo'?'pill-fijo':'pill-variable'"><span class="dot"></span><span x-text="e.es_transferencia?'Transf.':e.tipo==='fijo'?'Fijo':'Variable'"></span></span>
+                        <span class="amt" x-text="clp(e.total)"></span>
+                        <span class="acts">
+                          <button class="btn btn-secondary btn-icon btn-sm" @click="abrirModalEgreso(e)">✎</button>
+                          <button class="btn btn-danger btn-icon btn-sm" @click="eliminarEgreso(e.id)">✕</button>
+                        </span>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </div>
+            </template>
+            <div x-show="!egresosPorCategoria.length" class="empty"><h3>Sin egresos</h3><div>No hay movimientos que coincidan con los filtros</div></div>
+          </div>
+        </div>
+
+        <!-- VISTA DETALLE (tabla plana) -->
+        <div x-show="egVista==='lista'" x-cloak>
+          <div class="table-scroll">
+            <table class="data">
+              <thead><tr>
+                <th @click="sortEgresos('fecha')">Fecha <span class="sort" x-show="fE.sortK==='fecha'" x-text="fE.sortD==='asc'?'↑':'↓'"></span></th>
+                <th @click="sortEgresos('categoria')">Categoría <span class="sort" x-show="fE.sortK==='categoria'" x-text="fE.sortD==='asc'?'↑':'↓'"></span></th>
+                <th>Detalle</th>
+                <th>Tipo</th>
+                <th class="num" @click="sortEgresos('total')">Monto <span class="sort" x-show="fE.sortK==='total'" x-text="fE.sortD==='asc'?'↑':'↓'"></span></th>
+                <th></th>
+              </tr></thead>
+              <tbody>
+                <template x-for="e in egresosPaginados" :key="e.id">
+                  <tr :class="{'row-dim': e.es_transferencia}">
+                    <td x-text="fmtFecha(e.fecha)"></td>
+                    <td><span class="catpill" x-text="e.categoria"></span></td>
+                    <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis" x-text="e.detalle"></td>
+                    <td><span class="pill" :class="e.es_transferencia?'pill-transfer':e.tipo==='fijo'?'pill-fijo':'pill-variable'"><span class="dot"></span><span x-text="e.es_transferencia?'Transf.':e.tipo==='fijo'?'Fijo':'Variable'"></span></span></td>
+                    <td class="num strong" x-text="clp(e.total)"></td>
+                    <td><div style="display:flex;gap:4px;justify-content:flex-end">
+                      <button class="btn btn-secondary btn-icon btn-sm" @click="abrirModalEgreso(e)">✎</button>
+                      <button class="btn btn-danger btn-icon btn-sm" @click="eliminarEgreso(e.id)">✕</button>
+                    </div></td>
+                  </tr>
+                </template>
+                <tr x-show="egresosFiltered.length===0"><td colspan="6" class="empty">No hay egresos que coincidan</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="pagination">
+            <span x-text="'Página '+fE.pag+' de '+Math.max(1,Math.ceil(egresosFiltered.length/25))+' · '+egresosPaginados.length+' de '+egresosFiltered.length"></span>
+            <div style="display:flex;gap:6px">
+              <button class="pag-btn" @click="fE.pag--" :disabled="fE.pag<=1">‹ Anterior</button>
+              <button class="pag-btn" @click="fE.pag++" :disabled="fE.pag>=Math.ceil(egresosFiltered.length/25)">Siguiente ›</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ───────── INGRESOS ───────── -->
+    <div x-show="view==='ingresos'" x-cloak class="fade-up">
+      <div class="table-wrap">
+        <div class="toolbar">
+          <select x-model="fI.ano" @change="fI.pag=1">
+            <option value="">Todos los años</option>
+            <option>2025</option><option>2026</option>
+          </select>
+          <select x-model="fI.mes" @change="fI.pag=1">
+            <option value="">Todos los meses</option>
+            <template x-for="m in meses12" :key="m.v"><option :value="m.v" x-text="m.l"></option></template>
+          </select>
+          <select x-model="fI.cat" @change="fI.pag=1">
+            <option value="">Todas las categorías</option>
+            <template x-for="c in categoriasIngreso" :key="c"><option :value="c" x-text="c"></option></template>
+          </select>
+          <label style="display:flex;align-items:center;gap:6px;font-size:var(--fs-xs);color:var(--text-tertiary);cursor:pointer">
+            <input type="checkbox" x-model="fI.soloReemb" style="height:auto"> Solo reembolsos
+          </label>
+          <span class="grow summary"><b x-text="ingresosFiltered.length"></b> registros · total <b x-text="clp(ingresosFiltered.reduce((s,i)=>s+i.monto,0))"></b></span>
+        </div>
+        <div class="table-scroll">
+          <table class="data">
+            <thead><tr>
+              <th @click="sortIngresos('fecha')">Fecha <span class="sort" x-show="fI.sortK==='fecha'" x-text="fI.sortD==='asc'?'↑':'↓'"></span></th>
+              <th @click="sortIngresos('categoria')">Categoría <span class="sort" x-show="fI.sortK==='categoria'" x-text="fI.sortD==='asc'?'↑':'↓'"></span></th>
+              <th>Detalle / origen</th>
+              <th>Tipo</th>
+              <th class="num" @click="sortIngresos('monto')">Monto <span class="sort" x-show="fI.sortK==='monto'" x-text="fI.sortD==='asc'?'↑':'↓'"></span></th>
+              <th></th>
+            </tr></thead>
+            <tbody>
+              <template x-for="i in ingresosPaginados" :key="i.id">
+                <tr>
+                  <td x-text="fmtFecha(i.fecha)"></td>
+                  <td><span class="catpill" x-text="i.categoria"></span></td>
+                  <td style="color:var(--text-tertiary);max-width:220px;overflow:hidden;text-overflow:ellipsis" x-text="i.detalle || i.reemb_concepto || '—'"></td>
+                  <td><span class="pill" :class="i.es_reembolso?'pill-reembolso':'pill-fijo'"><span class="dot"></span><span x-text="i.es_reembolso?'Reembolso':'Ingreso'"></span></span></td>
+                  <td class="num pos strong" x-text="clp(i.monto)"></td>
+                  <td><div style="display:flex;gap:4px;justify-content:flex-end">
+                    <button class="btn btn-secondary btn-icon btn-sm" @click="abrirModalIngreso(i)">✎</button>
+                    <button class="btn btn-danger btn-icon btn-sm" @click="eliminarIngreso(i.id)">✕</button>
+                  </div></td>
+                </tr>
+              </template>
+              <tr x-show="ingresosFiltered.length===0"><td colspan="6" class="empty">No hay ingresos que coincidan</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination">
+          <span x-text="'Página '+fI.pag+' de '+Math.max(1,Math.ceil(ingresosFiltered.length/25))+' · '+ingresosPaginados.length+' de '+ingresosFiltered.length"></span>
+          <div style="display:flex;gap:6px">
+            <button class="pag-btn" @click="fI.pag--" :disabled="fI.pag<=1">‹ Anterior</button>
+            <button class="pag-btn" @click="fI.pag++" :disabled="fI.pag>=Math.ceil(ingresosFiltered.length/25)">Siguiente ›</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ───────── IMPORTAR MP ───────── -->
+    <div x-show="view==='importar'" x-cloak class="fade-up">
+      <div x-show="!mpTransacciones.length">
+        <div class="alert alert-yellow" x-show="mpDataNote && !mpReportePendiente">
+          <span>⚠</span><span>El reporte de MP no incluye nombre de comercio. Se reconcilia por <b>fecha + monto</b> contra tus EGRESO, sin duplicar lo ya cargado. Para ver el comercio, descarga el CSV desde <b>Actividad</b> de Mercado Pago.</span>
+        </div>
+
+        <!-- Confirmación del reporte detectado (rango + banco) -->
+        <div class="card" x-show="mpReportePendiente" style="padding:20px;margin-bottom:16px">
+          <div style="margin-bottom:14px"><h3 style="font-size:var(--fs-h2);font-weight:600">Confirmar reporte a revisar</h3><div class="sub" style="font-size:var(--fs-xs);color:var(--text-tertiary);margin-top:2px" x-text="mpReportePendiente?.archivo"></div></div>
+          <div style="display:flex;flex-wrap:wrap;gap:22px;align-items:flex-end">
+            <div>
+              <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.1em;font-weight:600;margin-bottom:4px">Movimientos reales</div>
+              <div style="font-size:22px;font-weight:600;font-family:var(--font-num)" x-text="mpReportePendiente?.n"></div>
+              <div class="muted" style="font-size:11px;margin-top:2px">de <b x-text="mpReportePendiente?.nTotal"></b> filas del archivo</div>
+              <div style="font-size:11px;margin-top:2px;color:var(--negative-ink)" x-show="mpReportePendiente?.nCashback">✕ <b x-text="mpReportePendiente?.nCashback"></b> cashback eliminados (Meli Dólar)</div>
+              <div class="muted" style="font-size:11px;margin-top:1px" x-show="mpReportePendiente?.nSinFecha"><b x-text="mpReportePendiente?.nSinFecha"></b> sin fecha (omitidas)</div>
+            </div>
+            <div>
+              <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.1em;font-weight:600;margin-bottom:4px">Período del reporte</div>
+              <div style="font-size:15px;font-weight:600"><span x-text="fmtFecha(mpReportePendiente?.desde)"></span> &nbsp;→&nbsp; <span x-text="fmtFecha(mpReportePendiente?.hasta)"></span></div>
+            </div>
+            <div>
+              <label class="muted" style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.1em;font-weight:600;margin-bottom:4px">Banco / fuente</label>
+              <select x-model="mpBanco" style="width:180px;height:36px">
+                <option>Mercado Pago</option><option>Banco BICE</option><option>Banco Santander</option><option>Otro</option>
+              </select>
+            </div>
+            <div style="margin-left:auto;display:flex;gap:8px">
+              <button class="btn btn-secondary" @click="cancelarReporteMP()">Cancelar</button>
+              <button class="btn btn-primary" @click="confirmarReporteMP()">Revisar y sugerir →</button>
+            </div>
+          </div>
+          <!-- Desglose por tipo de operación: transparencia de qué trae el archivo (cuántos Pago aprobado / Cashback / Devolución) -->
+          <div x-show="mpReportePendiente?.tipos?.length" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--divider);display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+            <span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;margin-right:4px">Desglose del archivo</span>
+            <template x-for="tp in mpReportePendiente.tipos" :key="tp.tipo">
+              <span class="pill pill-ghost" style="font-size:11px" :style="tp.tipo.toLowerCase().includes('cashback')?'color:var(--negative-ink);text-decoration:line-through;opacity:.7':''"><span x-text="tp.tipo"></span>: <b x-text="tp.n"></b></span>
+            </template>
+          </div>
+        </div>
+
+        <!-- Subir + pre-cargadas + historial (cuando no hay reporte pendiente) -->
+        <div x-show="!mpReportePendiente">
+          <div class="upload-zone" @click="$refs.mpFile.click()" @dragover.prevent="$el.classList.add('drag')" @dragleave="$el.classList.remove('drag')" @drop.prevent="onFileDrop($event)">
+            <div style="font-size:30px;margin-bottom:10px">📄</div>
+            <div style="font-size:14px;font-weight:600;margin-bottom:6px;color:var(--text-primary)">Arrastrar o hacer clic para subir el próximo reporte MP</div>
+            <div style="font-size:12px">Acepta .xlsx y .csv exportados desde Mercado Pago · detecta rango y banco automáticamente</div>
+            <input type="file" x-ref="mpFile" accept=".xlsx,.csv" style="display:none" @change="onFileSelect($event)">
+          </div>
+          <div x-show="mpPreCargadas.length" class="mt16">
+            <div class="alert alert-green">
+              <span>✓</span>
+              <span><b x-text="mpPreCargadas.length"></b> transacciones de MP pendientes de revisar.
+                <button class="btn btn-secondary btn-sm" style="margin-left:8px" @click="cargarMPPreCargadas()">Ver y conciliar</button>
+              </span>
+            </div>
+          </div>
+          <!-- Retomar una revisión a medias (movimientos ya subidos pero aún sin aceptar/excluir) -->
+          <div x-show="mpHistPendientes.length" class="mt16">
+            <div class="alert alert-yellow">
+              <span>⏳</span>
+              <span>Tienes <b x-text="mpHistPendientes.length"></b> movimiento(s) <b>pendientes de revisar</b> de una carga anterior. Estos meses no aparecen en el dashboard hasta que termines.
+                <button class="btn btn-secondary btn-sm" style="margin-left:8px" @click="continuarRevisionMP()">Continuar revisión</button>
+              </span>
+            </div>
+          </div>
+
+          <!-- Historial de cargas (retroalimentación del sistema) -->
+          <div style="display:flex;align-items:center;gap:14px;margin-top:24px;margin-bottom:12px">
+            <span style="font-size:var(--fs-label);color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.12em;font-weight:600">Reportes cargados</span>
+            <span style="flex:1;height:1px;background:var(--divider)"></span>
+            <button class="btn btn-danger btn-sm" @click="reiniciarAExcel()" title="Reemplaza todo con el Excel de Contabilidad y limpia Mercado Pago">⟳ Reiniciar a Excel</button>
+          </div>
+          <div class="table-wrap">
+            <table class="data">
+              <thead><tr><th>Fecha carga</th><th>Banco / fuente</th><th>Período del reporte</th><th class="num">Documentos</th><th class="num">Sugeridos concil.</th><th class="num">Por revisar</th><th class="num">Duplicados</th></tr></thead>
+              <tbody>
+                <tr x-show="mpResumen.n">
+                  <td class="strong">Carga inicial</td>
+                  <td>Mercado Pago</td>
+                  <td><span x-text="fmtFecha(mpResumen.desde)"></span> → <span x-text="fmtFecha(mpResumen.hasta)"></span></td>
+                  <td class="num" x-text="mpResumen.n"></td>
+                  <td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td>
+                </tr>
+                <template x-for="(u,idx) in mpUploadsOrden" :key="idx">
+                  <tr>
+                    <td x-text="fmtFecha(u.fecha)"></td>
+                    <td x-text="u.banco"></td>
+                    <td><span x-text="fmtFecha(u.desde)"></span> → <span x-text="fmtFecha(u.hasta)"></span></td>
+                    <td class="num" x-text="u.documentos!=null?u.documentos:u.total"></td>
+                    <td class="num" x-text="u.sugeridosConcil!=null?u.sugeridosConcil:(u.conciliadas||0)"></td>
+                    <td class="num color-pos" x-text="u.porRevisar!=null?u.porRevisar:(u.nuevas||0)"></td>
+                    <td class="num muted" x-text="u.duplicadas||0"></td>
+                  </tr>
+                </template>
+                <tr x-show="!mpResumen.n && !mpUploadsOrden.length"><td colspan="7" class="empty">Aún no has cargado reportes</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div x-show="mpTransacciones.length">
+        <!-- Banner del reporte recién cargado: desglose y transparencia (cashback eliminados, período, banco) -->
+        <div class="card" x-show="mpUltimoReporte" style="padding:12px 16px;margin-bottom:12px;display:flex;flex-wrap:wrap;gap:16px;align-items:center">
+          <div>
+            <div class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;font-weight:600">Reporte cargado</div>
+            <div style="font-size:13px;font-weight:600" x-text="mpUltimoReporte?.archivo"></div>
+          </div>
+          <div>
+            <div class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;font-weight:600">Período</div>
+            <div style="font-size:13px;font-weight:600"><span x-text="fmtFecha(mpUltimoReporte?.desde)"></span> → <span x-text="fmtFecha(mpUltimoReporte?.hasta)"></span></div>
+          </div>
+          <div>
+            <div class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;font-weight:600">Movimientos reales</div>
+            <div style="font-size:13px;font-weight:600"><span x-text="mpUltimoReporte?.n"></span> <span class="muted" style="font-weight:400">de <span x-text="mpUltimoReporte?.nTotal"></span> filas</span></div>
+          </div>
+          <div x-show="mpUltimoReporte?.nCashback" style="color:var(--negative-ink)">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;font-weight:600">Cashback eliminados</div>
+            <div style="font-size:13px;font-weight:600">✕ <span x-text="mpUltimoReporte?.nCashback"></span> <span style="font-weight:400">(Meli Dólar)</span></div>
+          </div>
+          <div x-show="mpUltimoReporte?.nSinFecha" class="muted">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;font-weight:600">Sin fecha</div>
+            <div style="font-size:13px;font-weight:600"><span x-text="mpUltimoReporte?.nSinFecha"></span> omitidas</div>
+          </div>
+          <div style="margin-left:auto">
+            <label class="muted" style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:.1em;font-weight:600;margin-bottom:2px">Banco / fuente</label>
+            <select x-model="mpBanco" @change="mpTransacciones.forEach(t=>t.banco=mpBanco)" style="height:30px;font-size:12px;width:150px">
+              <option>Mercado Pago</option><option>Banco BICE</option><option>Banco Santander</option><option>Otro</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px">
+          <div style="font-size:var(--fs-sm)">
+            <b x-text="mpTransacciones.length"></b> movimientos ·
+            <span class="color-pos" x-text="mpListosCount+' seleccionados'"></span> ·
+            <span style="color:var(--warning)" x-text="mpPendientesAceptar+' por revisar'"></span> ·
+            <span class="muted" x-text="mpTransacciones.filter(t=>t._estado==='match').length+' a conciliar'"></span> ·
+            <span class="muted" x-text="mpTransacciones.filter(t=>t._estado==='nuevo').length+' nuevos'"></span> ·
+            <span class="muted" x-text="mpTransacciones.filter(t=>t._estado==='devol').length+' devoluciones'"></span>
+            <span x-show="mpTransacciones.filter(t=>t._excluido).length" style="color:var(--negative-ink)"> · <span x-text="mpTransacciones.filter(t=>t._excluido).length"></span> excluidos</span>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-secondary btn-sm" @click="mpTransacciones=[];mpDataNote=true" title="Cerrar la revisión (lo no resuelto queda pendiente)">✕ Cerrar</button>
+            <button class="btn btn-secondary btn-sm" @click="aceptarTodasMP()" :disabled="!mpPendientesAceptar" title="Marca (selecciona) todas las sugerencias completas">✓ Seleccionar todo (<span x-text="mpPendientesAceptar"></span>)</button>
+            <button class="btn btn-primary btn-sm" @click="cargarAceptadas()" :disabled="!mpListosCount" title="Carga a tus gastos SÓLO lo que seleccionaste">⬇ Cargar seleccionadas (<span x-text="mpListosCount"></span>)</button>
+          </div>
+        </div>
+        <div class="alert" style="background:rgba(52,211,153,.06);border:1px solid rgba(52,211,153,.25)">
+          <span>✓</span><span>Marca (✓) cada movimiento correcto o usa <b>Seleccionar todo</b>. <b>Nada se carga a tus gastos hasta que lo selecciones y pulses Cargar</b> — este es tu doble check. Lo que no selecciones ni excluyas queda pendiente y su mes no entra al dashboard.</span>
+        </div>
+        <div class="alert alert-yellow" x-show="mpNecesitanCat>0">
+          <span>❓</span><span><b x-text="mpNecesitanCat"></b> movimiento(s) <b>necesitan que les asignes grupo y categoría</b> (borde amarillo) antes de poder seleccionarlos. Usa el chip <b>“Necesitan categoría”</b> para revisarlos.</span>
+        </div>
+        <!-- Chips de filtro: navegar y editar lo pendiente -->
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
+          <button class="chip" :class="{active: mpFiltro==='todos'}" @click="mpFiltro='todos'">Todos (<span x-text="mpTransacciones.length"></span>)</button>
+          <button class="chip" :class="{active: mpFiltro==='falta'}" @click="mpFiltro='falta'">Necesitan categoría (<span x-text="mpNecesitanCat"></span>)</button>
+          <button class="chip" :class="{active: mpFiltro==='sel'}" @click="mpFiltro='sel'">Seleccionados (<span x-text="mpListosCount"></span>)</button>
+          <button class="chip" :class="{active: mpFiltro==='excl'}" @click="mpFiltro='excl'">Excluidos (<span x-text="mpTransacciones.filter(t=>t._excluido).length"></span>)</button>
+        </div>
+        <div class="table-wrap"><div class="table-scroll">
+          <table class="data mp-conc">
+            <thead><tr>
+              <th style="width:40px;text-align:center" title="Seleccionar todo"><input type="checkbox" :checked="mpTodoSeleccionado" @change="toggleSelAllMP($event.target.checked)" title="Seleccionar / deseleccionar todo"></th>
+              <th style="width:82px">Fecha</th>
+              <th class="num" style="width:96px">Monto neto</th>
+              <th style="width:120px">Estado</th>
+              <th style="width:150px">Grupo</th>
+              <th style="width:160px">Categoría</th>
+              <th style="width:150px">Detalle</th>
+              <th style="width:185px">Acción</th>
+            </tr></thead>
+            <tbody>
+              <template x-for="(t,idx) in mpTransacciones" :key="t._rk||t.id_mp||idx">
+                <tr x-show="mpEnFiltro(t)" :class="{'row-ok': t._aceptada&&!t._excluido, 'row-dim': t._estado==='dup', 'row-need': (t._estado==='nuevo'||t._estado==='ingreso'||t._estado==='reemb')&&!t._excluido&&!mpCompleto(t), 'row-excl': t._excluido}">
+                  <td style="text-align:center"><input type="checkbox" x-show="!t._excluido && t._estado!=='dup'" x-model="t._aceptada" :disabled="!mpCompleto(t)" :title="mpCompleto(t)?'Seleccionar para cargar':'Asigna grupo y categoría primero'"></td>
+                  <td x-text="fmtFecha(t.fecha)" style="white-space:nowrap"></td>
+                  <td class="num" :class="t.es_egreso?'neg':'pos'" x-text="clp(t.monto_neto!=null?t.monto_neto:t.valor)" :title="'Valor compra: '+clp(t.valor)+' · Neto: '+clp(t.monto_neto)"></td>
+                  <!-- Estado -->
+                  <td style="font-size:11px;line-height:1.3">
+                    <span x-show="t._excluido" style="color:var(--negative-ink);font-weight:600">✕ Excluido</span>
+                    <span x-show="!t._excluido && t._aceptada" class="color-pos" style="font-weight:700">✓ Aceptado</span>
+                    <template x-if="!t._excluido && !t._aceptada">
+                      <span>
+                        <span x-show="t._estado==='match'" style="color:var(--info)">Ya está en gastos</span>
+                        <span x-show="t._estado==='nuevo'" style="color:var(--warning)">Nuevo egreso</span>
+                        <span x-show="t._estado==='ingreso'" style="color:var(--info)">Ingreso</span>
+                        <span x-show="t._estado==='reemb'" style="color:var(--info)">Reembolso</span>
+                        <span x-show="t._estado==='devol'" class="muted">Devolución</span>
+                        <span x-show="t._estado==='dup'" class="muted">Ya cargado</span>
+                      </span>
+                    </template>
+                  </td>
+                  <!-- Grupo -->
+                  <td>
+                    <div x-show="t._estado==='nuevo' && !t._excluido" style="display:flex;align-items:center;gap:4px">
+                      <span x-show="t._sugerida" title="Sugerido por el sistema — revísalo" style="color:var(--accent-bright);font-size:12px">✨</span>
+                      <select x-model="t._grupo" x-init="$nextTick(()=>{ if(t._grupo) $el.value=t._grupo })" @change="onEditarSugerencia(t)" style="height:28px;font-size:11px;width:120px" title="Grupo">
+                        <option value="">— Grupo —</option>
+                        <template x-for="g in MACROS" :key="g"><option :value="g" x-text="g"></option></template>
+                      </select>
+                    </div>
+                    <span x-show="t._estado!=='nuevo' || t._excluido" class="muted" style="font-size:11px">—</span>
+                  </td>
+                  <!-- Categoría -->
+                  <td>
+                    <div x-show="t._estado==='nuevo' && !t._excluido">
+                      <select x-model="t._cat" x-init="$nextTick(()=>{ if(t._cat) $el.value=t._cat })" @change="if(t._cat && t._cat!=='__NUEVA__' && !t._grupo) t._grupo=macroDe(t._cat); onEditarSugerencia(t)" style="height:28px;font-size:11px;width:140px" title="Categoría">
+                        <option value="">— Categoría —</option>
+                        <template x-for="c in categoriasEgreso" :key="c"><option :value="c" x-text="c"></option></template>
+                        <option value="__NUEVA__">+ Nueva…</option>
+                      </select>
+                      <input x-show="t._cat==='__NUEVA__'" type="text" x-model="t._catNueva" @input="onEditarSugerencia(t)" placeholder="Nueva categoría" style="height:28px;font-size:11px;width:140px;margin-top:3px">
+                    </div>
+                    <div x-show="(t._estado==='ingreso'||t._estado==='reemb') && !t._excluido" style="display:flex;align-items:center;gap:4px">
+                      <span x-show="t._cat" title="Sugerido por el sistema — revísalo" style="color:var(--accent-bright);font-size:12px">✨</span>
+                      <select x-model="t._cat" x-init="$nextTick(()=>{ if(t._cat) $el.value=t._cat })" @change="onEditarSugerencia(t)" style="height:28px;font-size:11px;width:130px" title="Categoría de ingreso">
+                        <option value="">— Categoría —</option>
+                        <template x-for="c in [...new Set([...categoriasIngreso,'INTERESES','SUELDO LIQUIDO','REEMBOLSO','OTROS'])]" :key="c"><option :value="c" x-text="c"></option></template>
+                      </select>
+                    </div>
+                    <span x-show="(t._estado==='match'||t._estado==='devol'||t._estado==='dup'||t._excluido)" class="muted" style="font-size:11px">—</span>
+                  </td>
+                  <!-- Detalle -->
+                  <td>
+                    <input x-show="(t._estado==='nuevo'||t._estado==='ingreso'||t._estado==='reemb') && !t._excluido" type="text" x-model="t._det" @input="onEditarSugerencia(t)" placeholder="Detalle…" style="height:28px;font-size:11px;width:140px">
+                    <span x-show="t._estado==='match' && !t._excluido" class="muted" style="font-size:10px" x-text="t._matchInfo||'—'"></span>
+                    <span x-show="(t._estado==='devol'||t._estado==='dup'||t._excluido)" class="muted" style="font-size:11px">—</span>
+                  </td>
+                  <!-- Acción: Aceptar / Excluir / Reclasificar -->
+                  <td>
+                    <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
+                      <template x-if="!t._excluido && t._estado!=='dup'">
+                        <span>
+                          <button x-show="!t._aceptada" class="btn btn-primary btn-sm" :disabled="!mpCompleto(t)" @click="aceptarMP(t)" :title="mpCompleto(t)?'Aceptar esta conciliación':'Asigna grupo y categoría primero'">✓ Aceptar</button>
+                          <button x-show="t._aceptada" class="btn btn-sm" style="background:var(--accent-soft);color:var(--accent-bright);border:1px solid var(--accent-line)" @click="desaceptarMP(t)" title="Aceptado — clic para quitar">✓ Aceptado</button>
+                        </span>
+                      </template>
+                      <button x-show="(t._estado==='nuevo'||t._estado==='ingreso'||t._estado==='reemb'||t._estado==='devol')" class="btn btn-sm" :class="t._excluido?'btn-secondary':'btn-danger'" @click="toggleExcluirMP(t)" :title="t._excluido?'Volver a incluir':'Excluir: no contar este movimiento'" x-text="t._excluido?'↩ Incluir':'✕ Excluir'"></button>
+                      <button x-show="(t._estado==='match'||t._estado==='devol')&&!t._excluido" class="btn btn-secondary btn-sm" @click="reclasificarMP(t)" title="Reclasificar (si el sistema se equivocó)">↻</button>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+              <tr x-show="!mpFiltradasCount">
+                <td colspan="8" class="empty" style="text-align:center;padding:20px">
+                  No hay movimientos en este filtro.
+                  <button class="btn btn-secondary btn-sm" style="margin-left:8px" @click="mpFiltro='todos'">Ver todos</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div></div>
+      </div>
+    </div>
+
+    <!-- ───────── YoY ───────── -->
+    <div x-show="view==='yoy'" x-cloak class="fade-up">
+      <div class="chart-card">
+        <div class="card-head"><h3>Curva de utilidad · 2025 vs 2026</h3></div>
+        <div class="chart-body"><canvas x-ref="chartYoY" height="110"></canvas></div>
+      </div>
+      <div class="section-title">Utilidad mensual (Ingresos − Egresos)</div>
+      <div class="table-wrap">
+        <table class="data yoy-table">
+          <thead><tr><th>Mes</th><th class="num">2025</th><th class="num">2026</th><th class="num">Δ YoY</th></tr></thead>
+          <tbody>
+            <template x-for="row in yoyRows" :key="row.mes">
+              <tr>
+                <td class="strong" x-text="row.mes"></td>
+                <td class="num" :class="yoyClass(row.ut_2025)" x-text="row.ut_2025!=null?clp(row.ut_2025):'—'"></td>
+                <td class="num" :class="yoyClass(row.ut_2026)" x-text="row.ut_2026!=null?clp(row.ut_2026):'—'"></td>
+                <td class="num" :class="yoyClass(row.delta)" x-text="row.delta!=null?clp(row.delta):'—'"></td>
+              </tr>
+            </template>
+          </tbody>
+          <tfoot>
+            <tr style="font-weight:700">
+              <td class="strong">TOTAL AÑO</td>
+              <td class="num" :class="yoyClass(totalYoy2025)" x-text="clp(totalYoy2025)"></td>
+              <td class="num" :class="yoyClass(totalYoy2026)" x-text="clp(totalYoy2026)"></td>
+              <td class="num"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div class="section-title">Notas por mes</div>
+      <div class="notes-grid">
+        <template x-for="row in yoyRows" :key="'nota-'+row.mes">
+          <div class="note-card">
+            <div class="mlabel" x-text="row.mes"></div>
+            <textarea :placeholder="'Nota para '+row.mes+'…'" x-model="row.nota" @change="guardarNota(row)"></textarea>
+          </div>
+        </template>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /main -->
+
+<!-- ═══════════════ MODALES ═══════════════ -->
+<div class="overlay" x-show="modales.egreso" x-cloak @click.self="modales.egreso=false">
+  <div class="modal">
+    <h3 x-text="form.id?'Editar Egreso':'Nuevo Egreso'"></h3>
+    <div class="modal-inner">
+      <div class="form-row"><label>Fecha</label><input type="date" x-model="form.fecha"></div>
+      <div class="form-row"><label>Categoría</label>
+        <select x-model="form.categoria">
+          <option value="">— Seleccionar —</option>
+          <template x-for="c in categoriasEgreso" :key="c"><option :value="c" x-text="c"></option></template>
+          <option value="__NUEVA__">+ Nueva categoría…</option>
+        </select>
+        <input type="text" x-show="form.categoria==='__NUEVA__'" x-model="form.cat_nueva" placeholder="Nombre de la nueva categoría" style="margin-top:6px">
+      </div>
+      <div class="form-row"><label>Detalle</label><input type="text" x-model="form.detalle" placeholder="Descripción del gasto"></div>
+      <div class="form-row"><label>Tipo</label>
+        <select x-model="form.tipo"><option value="fijo">Fijo</option><option value="variable">Variable</option></select>
+      </div>
+      <div class="form-row"><label>Monto ($)</label><input type="number" x-model="form.monto" placeholder="0"></div>
+      <div class="form-row"><label style="display:flex;align-items:center;gap:6px;text-transform:none;font-size:var(--fs-xs)"><input type="checkbox" x-model="form.es_transferencia" style="height:auto"> Es transferencia interna (REGULARIZACIÓN BICE)</label></div>
+    </div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" @click="modales.egreso=false">Cancelar</button>
+      <button class="btn btn-primary" @click="guardarEgreso()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" x-show="modales.ingreso" x-cloak @click.self="modales.ingreso=false">
+  <div class="modal">
+    <h3 x-text="form.id?'Editar Ingreso':'Nuevo Ingreso'"></h3>
+    <div class="modal-inner">
+      <div class="form-row"><label>Fecha</label><input type="date" x-model="form.fecha"></div>
+      <div class="form-row"><label>Categoría</label>
+        <select x-model="form.categoria">
+          <option value="">— Seleccionar —</option>
+          <template x-for="c in categoriasIngreso" :key="c"><option :value="c" x-text="c"></option></template>
+          <option>SUELDO LIQUIDO</option><option>INTERESES</option><option>BONO</option><option>OTROS</option>
+        </select>
+      </div>
+      <div class="form-row"><label>Detalle / origen</label><input type="text" x-model="form.detalle" placeholder="Ej: Préstamo Moralín"></div>
+      <div class="form-row"><label>Monto ($)</label><input type="number" x-model="form.monto" placeholder="0"></div>
+      <div class="form-row"><label style="display:flex;align-items:center;gap:6px;text-transform:none;font-size:var(--fs-xs)"><input type="checkbox" x-model="form.es_reembolso" style="height:auto"> Es reembolso (descuenta de egreso)</label></div>
+      <div x-show="form.es_reembolso" class="form-row"><label>Concepto del reembolso</label><input type="text" x-model="form.reemb_concepto" placeholder="Ej: Pago cancha Javier"></div>
+    </div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" @click="modales.ingreso=false">Cancelar</button>
+      <button class="btn btn-primary" @click="guardarIngreso()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Organizar grupos -->
+<div class="overlay" x-show="modales.macros" x-cloak @click.self="modales.macros=false">
+  <div class="modal" style="width:580px">
+    <h3>Organizar categorías en grupos</h3>
+    <div class="modal-inner" style="max-height:62vh;overflow-y:auto">
+      <div class="muted" style="font-size:var(--fs-xs);margin-bottom:12px">Reasigna cada categoría al grupo que prefieras. Se guarda automáticamente.</div>
+      <template x-for="c in categoriasEgreso" :key="c">
+        <div class="org-row">
+          <span class="oc" x-text="c"></span>
+          <select @change="setMacro(c,$event.target.value)" style="width:220px">
+            <template x-for="m in MACROS" :key="m"><option :value="m" x-text="m" :selected="m===macroDe(c)"></option></template>
+          </select>
+        </div>
+      </template>
+    </div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" @click="restaurarMacros()">Restaurar por defecto</button>
+      <button class="btn btn-primary" @click="modales.macros=false">Listo</button>
+    </div>
+  </div>
+</div>
+
+</div>
+</template><!-- /app-shell · /x-if unlocked -->
+
+<!-- ═══════════════ JAVASCRIPT ═══════════════ -->
+<script>
+// ── Helpers ──────────────────────────────────────
+function clp(n){ if(n==null||isNaN(n)) return '$0'; const abs=Math.abs(Math.round(n)); const s=abs.toString().replace(/\B(?=(\d{3})+(?!\d))/g,'.'); return (n<0?'-$':'$')+s; }
+function fmtFecha(d){ if(!d) return ''; const [y,m,dd]=d.split('-'); return `${dd}/${m}/${y}`; }
+function isoHoy(){ const h=new Date(); return `${h.getFullYear()}-${String(h.getMonth()+1).padStart(2,'0')}-${String(h.getDate()).padStart(2,'0')}`; }
+function mesActual(){ return isoHoy().slice(0,7); }
+function mesLabel(m){ const a=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']; return a[parseInt(m)-1]||m; }
+function mesLabelLargo(m){ const a=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']; return a[parseInt(m)-1]||m; }
+function mesAnterior(ym){ let [y,m]=ym.split('-').map(Number); m--; if(m<1){m=12;y--;} return `${y}-${String(m).padStart(2,'0')}`; }
+function daysDiff(a,b){ return Math.abs((new Date(a)-new Date(b))/86400000); }
+// Orden cronológico de meses (para la tabla YoY)
+const ORDEN_MES={ENERO:1,FEBRERO:2,MARZO:3,ABRIL:4,MAYO:5,JUNIO:6,JULIO:7,AGOSTO:8,SEPTIEMBRE:9,OCTUBRE:10,NOVIEMBRE:11,DICIEMBRE:12};
+// Unifica las categorías de ingreso "INTERES/INTERESES PRESTAMO ..." en una sola: INTERESES
+function normIngresoCat(cat){ return /INTERES/i.test(cat||'') ? 'INTERESES' : cat; }
+// Extrae el origen del préstamo desde la categoría original ("...PRESTAMO MORALIN" -> "Préstamo Moralin")
+function interesDetalle(cat){
+  const m=(cat||'').toString().match(/PR[ÉEé]?STAMO\s+(.+)$/i);
+  const resto=m?m[1].trim():'';
+  if(!resto) return '';
+  return 'Préstamo '+resto.toLowerCase().replace(/(^|\s)\S/g, s=>s.toUpperCase());
+}
+// Normaliza un ingreso: unifica categoría a INTERESES y conserva el origen en 'detalle'
+function normIngreso(x){
+  if(/INTERES/i.test(x.categoria||'')) return {...x, categoria:'INTERESES', detalle:(x.detalle||interesDetalle(x.categoria))};
+  return {...x};
+}
+
+const CHART = {
+  grid:'rgba(255,255,255,0.05)', text:'#a4a8af', tick:'#6c7077',
+  palette:['#34d399','#7aa2f7','#c4b5fd','#f6c177','#fb7185','#5eead4','#94a3b8','#4ade9f','#f0c074','#9db8f5'],
+  pos:'#34d399', neg:'#fb7185', info:'#7aa2f7'
+};
+
+// Lista de grupos (macro-categorias) disponibles
+const MACROS_LIST = ['Alimentación','Transporte y Auto','Suscripciones y Tech','Salud y Deporte','Entretención y Salidas','Apuestas y Juego','Compras y Cuidado','Viajes y Educación','Otros','Transferencias internas'];
+// Mapeo por defecto categoria -> grupo (editable por el usuario; persiste en IndexedDB)
+const MACRO_MAP = {
+  'ALMUERZO':'Alimentación','ALMUERZO PEGA':'Alimentación','CAFE Y MAS':'Alimentación','COMIDA':'Alimentación','UBER EATS':'Alimentación',
+  'AUTO':'Transporte y Auto','ESTACIONAMIENTO':'Transporte y Auto','TESLA':'Transporte y Auto','UBER':'Transporte y Auto',
+  'AMAZON PRIME':'Suscripciones y Tech','APPLE':'Suscripciones y Tech','CHATGPT':'Suscripciones y Tech','CLAUDE AI':'Suscripciones y Tech','DISNEY':'Suscripciones y Tech','GOOGLE':'Suscripciones y Tech','NETFLIX':'Suscripciones y Tech','PLAY':'Suscripciones y Tech','PLUS':'Suscripciones y Tech','YOUTUBE':'Suscripciones y Tech',
+  'CLINICA':'Salud y Deporte','FARMACIA':'Salud y Deporte','KINESIOLOGIA':'Salud y Deporte','GIMNASIO':'Salud y Deporte','FIGHTING':'Salud y Deporte','FUTBOL':'Salud y Deporte','FC MIO':'Salud y Deporte',
+  'CARRETE':'Entretención y Salidas','CONCIERTO':'Entretención y Salidas','ENTRETENCION FDS':'Entretención y Salidas','AMOR':'Entretención y Salidas','CHICA':'Entretención y Salidas','MUJERES':'Entretención y Salidas',
+  'APUESTA':'Apuestas y Juego','POKER':'Apuestas y Juego',
+  'MERCADO LIBRE':'Compras y Cuidado','ROPA':'Compras y Cuidado','COMPRAS DEBITO':'Compras y Cuidado','LAMINAS':'Compras y Cuidado','CORTE DE PELO':'Compras y Cuidado','CORTE ENEESE':'Compras y Cuidado','REGALO':'Compras y Cuidado',
+  'VACACIONES':'Viajes y Educación','COLEGIO INGECOS':'Viajes y Educación',
+  'REGULARIZACIÓN BICE':'Transferencias internas','REGULARIZACION BICE':'Transferencias internas',
+  'GHOST':'Otros','RISA':'Otros','TATA TOTI':'Otros','OTROS':'Otros'
+};
+
+// ── Dexie DB ─────────────────────────────────────
+const db = new Dexie('GastosMarco_v2');
+db.version(1).stores({
+  egresos:'++id, fecha, categoria, tipo, origen',
+  ingresos:'++id, fecha, categoria, origen',
+  patrimonio:'++id, periodo, institucion',
+  yoy:'mes',
+  mp_hist:'++id, id_mp, fecha',
+  notas:'clave'
+});
+db.version(2).stores({ macromap:'categoria' });
+db.version(3).stores({ vault:'k' });   // bóveda cifrada: registros 'meta','verifier','blob'
+
+// ═══════════════ CRIPTOGRAFÍA DE LA BÓVEDA (Web Crypto, sin librerías) ═══════════════
+// Clave en memoria, FUERA de Alpine (evita que un Proxy envuelva el CryptoKey). Nunca se persiste.
+let VAULT_KEY = null;
+const KDF_ITER = 310000;        // OWASP PBKDF2-HMAC-SHA256
+const KDF_HASH = 'SHA-256';
+const SALT_BYTES = 16;
+const IV_BYTES   = 12;
+const KEY_BITS   = 256;
+const VERIFIER_PLAINTEXT = { magic: 'GASTOS_VAULT_OK', v: 1 };
+
+function bufToB64(buf){ const b=new Uint8Array(buf); let s=''; for(let i=0;i<b.length;i++) s+=String.fromCharCode(b[i]); return btoa(s); }
+function b64ToBuf(b64){ const bin=atob(b64); const b=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) b[i]=bin.charCodeAt(i); return b; }
+function randomBytes(n){ return crypto.getRandomValues(new Uint8Array(n)); }
+
+async function deriveKey(password, salt){
+  const baseKey=await crypto.subtle.importKey('raw', new TextEncoder().encode(password), {name:'PBKDF2'}, false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    {name:'PBKDF2', salt, iterations:KDF_ITER, hash:KDF_HASH},
+    baseKey, {name:'AES-GCM', length:KEY_BITS}, false, ['encrypt','decrypt']
+  );
+}
+async function encryptJSON(obj, key){
+  const iv=randomBytes(IV_BYTES);
+  const data=new TextEncoder().encode(JSON.stringify(obj));
+  const ct=await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, data);
+  return { iv:bufToB64(iv), ct:bufToB64(ct) };
+}
+async function decryptJSON(blob, key){
+  const iv=b64ToBuf(blob.iv), ct=b64ToBuf(blob.ct);
+  const pt=await crypto.subtle.decrypt({name:'AES-GCM', iv}, key, ct);
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+async function verifyPassword(key, verifierBlob){ try{ await decryptJSON(verifierBlob, key); return true; }catch(e){ return false; } }
+
+async function createVault(password, plainData){
+  const salt=randomBytes(SALT_BYTES);
+  const key=await deriveKey(password, salt);
+  const verifier=await encryptJSON(VERIFIER_PLAINTEXT, key);
+  const blob=await encryptJSON(plainData, key);
+  await db.vault.bulkPut([
+    { k:'meta', kdf:'PBKDF2', hash:KDF_HASH, iter:KDF_ITER, salt:bufToB64(salt), v:1 },
+    { k:'verifier', iv:verifier.iv, ct:verifier.ct },
+    { k:'blob', iv:blob.iv, ct:blob.ct }
+  ]);
+  return key;
+}
+async function unlockVault(password){
+  const meta=await db.vault.get('meta');
+  const ver=await db.vault.get('verifier');
+  if(!meta||!ver) throw new Error('No existe la bóveda');
+  const key=await deriveKey(password, b64ToBuf(meta.salt));
+  if(!(await verifyPassword(key, ver))) throw new Error('Contraseña incorrecta');
+  return key;
+}
+async function saveVaultBlob(plainData, key){
+  const blob=await encryptJSON(plainData, key);
+  await db.vault.put({ k:'blob', iv:blob.iv, ct:blob.ct });
+}
+async function loadVaultBlob(key){
+  const blob=await db.vault.get('blob');
+  return blob ? decryptJSON(blob, key) : null;
+}
+async function changePassword(oldPwd, newPwd){
+  const meta=await db.vault.get('meta');
+  const oldKey=await deriveKey(oldPwd, b64ToBuf(meta.salt));
+  const ver=await db.vault.get('verifier');
+  if(!(await verifyPassword(oldKey, ver))) throw new Error('Contraseña actual incorrecta');
+  const plain=await loadVaultBlob(oldKey);
+  const newSalt=randomBytes(SALT_BYTES);
+  const newKey=await deriveKey(newPwd, newSalt);
+  const newVer=await encryptJSON(VERIFIER_PLAINTEXT, newKey);
+  const newBlob=await encryptJSON(plain, newKey);
+  await db.vault.bulkPut([
+    { k:'meta', kdf:'PBKDF2', hash:KDF_HASH, iter:KDF_ITER, salt:bufToB64(newSalt), v:1 },
+    { k:'verifier', iv:newVer.iv, ct:newVer.ct },
+    { k:'blob', iv:newBlob.iv, ct:newBlob.ct }
+  ]);
+  return newKey;
+}
+async function exportarRespaldo(plainData, key){
+  const meta=await db.vault.get('meta');
+  const blob=await encryptJSON(plainData, key);
+  const out={ fmt:'gastos-vault-backup', v:1, kdf:'PBKDF2', hash:KDF_HASH, iter:KDF_ITER, salt:meta.salt, iv:blob.iv, ct:blob.ct };
+  const file=new Blob([JSON.stringify(out)], {type:'application/octet-stream'});
+  const url=URL.createObjectURL(file);
+  const a=document.createElement('a');
+  a.href=url; a.download='respaldo-gastos-'+isoHoy()+'.enc'; a.click();
+  URL.revokeObjectURL(url);
+}
+async function importarRespaldo(fileText, password){
+  const o=JSON.parse(fileText);
+  if(o.fmt!=='gastos-vault-backup') throw new Error('Archivo no válido');
+  const key=await deriveKey(password, b64ToBuf(o.salt));
+  return decryptJSON({ iv:o.iv, ct:o.ct }, key);
+}
+
+// ═══════════════ SINCRONIZACIÓN EN LA NUBE (cifrada de extremo a extremo) ═══════════════
+// El servidor solo guarda el bloque CIFRADO + un "id" derivado de la contraseña. Nunca ve la contraseña ni el contenido.
+const SUPA_URL='https://pikbmocrnlosoujjllmw.supabase.co';
+const SUPA_KEY='sb_publishable_t69jY2QTrEF8TCz9b_X4oQ_j8lS-PN_';   // clave PUBLICABLE (segura de exponer; el acceso real lo protege el id secreto + cifrado)
+const SUPA_HEADERS={ 'apikey':SUPA_KEY, 'Authorization':'Bearer '+SUPA_KEY, 'Content-Type':'application/json' };
+let SYNC_ID=null;   // id del casillero, derivado de la contraseña (no se persiste)
+const SYNC_ID_SALT=new TextEncoder().encode('gastos-sync-id-v1');   // sal FIJA: misma contraseña -> mismo id en todos los equipos
+async function deriveSyncId(password){
+  const bk=await crypto.subtle.importKey('raw', new TextEncoder().encode(password), {name:'PBKDF2'}, false, ['deriveBits']);
+  const bits=await crypto.subtle.deriveBits({name:'PBKDF2', salt:SYNC_ID_SALT, iterations:KDF_ITER, hash:KDF_HASH}, bk, 256);
+  return 'v_'+bufToB64(bits).replace(/[^a-zA-Z0-9]/g,'').slice(0,42);
+}
+async function cloudFetch(){   // lee la fila del casillero (o null)
+  if(!SYNC_ID) return null;
+  const r=await fetch(SUPA_URL+'/rest/v1/rpc/vault_get', {method:'POST', headers:SUPA_HEADERS, body:JSON.stringify({p_id:SYNC_ID})});
+  if(!r.ok) throw new Error('cloud get '+r.status);
+  const arr=await r.json();
+  return (Array.isArray(arr)&&arr.length)?arr[0]:null;
+}
+async function cloudPut(salt, iv, ct){   // sube el bloque cifrado
+  if(!SYNC_ID) return;
+  const r=await fetch(SUPA_URL+'/rest/v1/rpc/vault_put', {method:'POST', headers:SUPA_HEADERS, body:JSON.stringify({p_id:SYNC_ID, p_salt:salt, p_iv:iv, p_ct:ct})});
+  if(!r.ok) throw new Error('cloud put '+r.status);
+}
+
+// ── Alpine App ───────────────────────────────────
+function app(){
+  return {
+    view:'dashboard', cargando:true, anoActivo:'2026', ultimaSync:'—', totalRegistros:0, mpDataNote:true, syncEstado:'—',
+    egresos:[], ingresos:[], patrimonio:[], yoyRows:[], mpTransacciones:[], mpPreCargadas:[], mpFiltro:'todos', mpUltimoReporte:null,
+    kpi:{ing:0,fijo:0,vari:0,util:0,egr:0}, kpiPrev:{ing:0,fijo:0,vari:0,util:0,egr:0},
+    dashMeses:[], rankBy:'gasto', egVista:'macro', expandedCats:{}, expandedMacros:{}, macroOverrides:{}, MACROS:MACROS_LIST,
+    charts:{},
+    fE:{ano:'2026',meses:[],cat:'',tipo:'',q:'',pag:1,sortK:'fecha',sortD:'desc',ordenCat:'monto'},
+    fI:{ano:'2026',mes:'',cat:'',soloReemb:false,pag:1,sortK:'fecha',sortD:'desc'},
+    modales:{egreso:false,ingreso:false,patrimonio:false,macros:false}, form:{}, formPatr:{},
+
+    // ── Seguridad / candado ──
+    unlocked:false,
+    gate:{ mode:'loading', pwd:'', pwd2:'', error:'', intentos:0, bloqueadoHasta:0, espera:0, fuerza:{score:0,label:'',pct:0,color:''} },
+    _mpHist:[], _notas:{}, _mpUploads:[], mpReportePendiente:null, mpBanco:'Mercado Pago',
+
+    navItems:[
+      {id:'dashboard',label:'Dashboard',icon:'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6'},
+      {id:'egresos',label:'Egresos',icon:'M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z'},
+      {id:'ingresos',label:'Ingresos',icon:'M12 4v16m8-8H4'},
+      {id:'importar',label:'Conciliación Bancaria',icon:'M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12'},
+      {id:'yoy',label:'YoY Utilidad',icon:'M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z'},
+    ],
+    meses12:[{v:'01',l:'Enero'},{v:'02',l:'Febrero'},{v:'03',l:'Marzo'},{v:'04',l:'Abril'},{v:'05',l:'Mayo'},{v:'06',l:'Junio'},{v:'07',l:'Julio'},{v:'08',l:'Agosto'},{v:'09',l:'Septiembre'},{v:'10',l:'Octubre'},{v:'11',l:'Noviembre'},{v:'12',l:'Diciembre'}],
+
+    // ── Computed ──
+    get crumb(){
+      if(this.view==='dashboard') return 'Resumen de '+this.dashPeriodoLabel;
+      if(this.view==='egresos') return 'Itemización de gastos';
+      if(this.view==='ingresos') return 'Entradas y reembolsos';
+      if(this.view==='importar') return 'Realizar conciliación bancaria';
+      if(this.view==='yoy') return 'Comparativo anual de utilidad';
+      return '';
+    },
+    get categoriasEgreso(){ return [...new Set(this.egresos.map(e=>e.categoria))].sort(); },
+    get categoriasIngreso(){ return [...new Set(this.ingresos.map(i=>i.categoria))].sort(); },
+    get mpPendCount(){ return this.mpPreCargadas.filter(t=>!t.clasificado).length; },
+    // resumen del histórico MP cargado (rango de fechas y total único)
+    get mpResumen(){
+      const mp=this._mpHist||[]; const seen=new Set();
+      const u=mp.filter(t=>{ if(seen.has(t.id_mp)) return false; seen.add(t.id_mp); return true; });
+      const f=u.map(t=>t.fecha).filter(Boolean).sort();
+      return { n:u.length, desde:f[0]||'', hasta:f[f.length-1]||'' };
+    },
+    get mpUploadsOrden(){ return [...(this._mpUploads||[])].reverse(); },
+    // ¿la transacción ya tiene una categoría utilizable?
+    // ¿la sugerencia tiene todo lo necesario para poder aceptarse? (egresos/ingresos nuevos requieren categoría; conciliar/devolución no)
+    mpCompleto(t){
+      if(t._excluido) return false;
+      if(t._estado==='nuevo'||t._estado==='ingreso'||t._estado==='reemb'){
+        const cat = t._cat==='__NUEVA__' ? (t._catNueva||'').trim() : (t._cat||'');
+        return !!cat;
+      }
+      return (t._estado==='match'||t._estado==='devol');
+    },
+    // listo para cargar = aceptado por el usuario, no excluido y completo
+    mpListo(t){ return !t._excluido && t._aceptada===true && this.mpCompleto(t); },
+    get mpListosCount(){ return this.mpTransacciones.filter(t=>this.mpListo(t)).length; },   // se cargarán al confirmar
+    // sugerencias completas que aún NO tienen el visto bueno del usuario
+    get mpPendientesAceptar(){ return this.mpTransacciones.filter(t=>!t._excluido && !t._aceptada && t._estado!=='dup' && this.mpCompleto(t)).length; },
+    // transacciones que necesitan que el usuario elija categoría antes de poder aceptarse
+    get mpNecesitanCat(){ return this.mpTransacciones.filter(t=>(t._estado==='nuevo'||t._estado==='ingreso'||t._estado==='reemb')&&!t._excluido&&!this.mpCompleto(t)).length; },
+    // aceptar / quitar el visto bueno (NADA se carga hasta que el usuario acepta — doble check)
+    aceptarMP(t){ if(!t._excluido && this.mpCompleto(t)) t._aceptada=true; },
+    desaceptarMP(t){ t._aceptada=false; },
+    aceptarTodasMP(){ this.mpTransacciones.forEach(t=>{ if(!t._excluido && t._estado!=='dup' && this.mpCompleto(t)) t._aceptada=true; }); },
+    // "Seleccionar todo" (checkbox maestro): marca/desmarca todas las sugerencias completas
+    get mpSeleccionables(){ return this.mpTransacciones.filter(t=>!t._excluido && t._estado!=='dup' && this.mpCompleto(t)).length; },
+    get mpTodoSeleccionado(){ return this.mpSeleccionables>0 && this.mpPendientesAceptar===0; },
+    toggleSelAllMP(checked){ this.mpTransacciones.forEach(t=>{ if(!t._excluido && t._estado!=='dup' && this.mpCompleto(t)) t._aceptada=!!checked; }); },
+    // ¿esta transacción pasa el filtro de chips activo? (se itera SIEMPRE sobre mpTransacciones y se oculta por fila con x-show)
+    mpEnFiltro(t){
+      const f=this.mpFiltro;
+      if(f==='falta') return (t._estado==='nuevo'||t._estado==='ingreso'||t._estado==='reemb')&&!t._excluido&&!this.mpCompleto(t);
+      if(f==='sel')   return t._aceptada && !t._excluido;
+      if(f==='excl')  return t._excluido;
+      return true;
+    },
+    get mpFiltradasCount(){ return this.mpTransacciones.filter(t=>this.mpEnFiltro(t)).length; },
+    // al editar la categoría/grupo/detalle de una sugerencia se quita el visto bueno (hay que volver a aceptar)
+    onEditarSugerencia(t){ t._aceptada=false; },
+    // excluir / volver a incluir una transacción (ej. compra devuelta). Al excluir se quita el visto bueno
+    toggleExcluirMP(t){ t._excluido=!t._excluido; if(t._excluido) t._aceptada=false; },
+    // reclasificar manualmente algo que el sistema concilió/ignoró (cuando se equivocó) — exige re-aceptar
+    reclasificarMP(t){ t._estado=t.es_egreso?'nuevo':'ingreso'; t._matchInfo=''; t._excluido=false; t._aceptada=false; t._cat=t._cat||''; t._grupo=t._grupo||''; t._det=t._det||''; t._catNueva=''; },
+    // continuar una revisión a medias: vuelve a cargar a la tabla los movimientos del historial aún sin resolver
+    get mpHistPendientes(){ return (this._mpHist||[]).filter(h=>!h.clasificado); },
+    async continuarRevisionMP(){
+      const trans=this.mpHistPendientes.map(h=>({id_mp:h.id_mp,fecha:h.fecha,valor:h.valor,monto_neto:h.monto_neto,tipo_op:h.tipo_op,medio_pago:h.medio_pago,banco:h.banco,es_egreso:((h.monto_neto!=null&&!isNaN(h.monto_neto))?h.monto_neto:h.valor)<0,_cat:'',_estado:'',_matchInfo:'',_aceptada:false}));
+      if(!trans.length){ alert('No hay movimientos pendientes de revisar.'); return; }
+      await this.conciliarMP(trans);
+    },
+
+    get mesesConDatos(){
+      const set=new Set();
+      this.egresos.forEach(e=>{ if(e.fecha?.startsWith(this.anoActivo)) set.add(e.fecha.slice(0,7)); });
+      this.ingresos.forEach(i=>{ if(i.fecha?.startsWith(this.anoActivo)) set.add(i.fecha.slice(0,7)); });
+      return [...set].sort().reverse();
+    },
+    // Meses con transacciones MP pendientes de categorizar -> "en revisión" (excluidos del dashboard)
+    get mesesRevision(){ const s=new Set(); (this._mpHist||[]).forEach(t=>{ if(!t.clasificado && t.fecha) s.add(t.fecha.slice(0,7)); }); return s; },
+    get hayRevision(){ return this.mesesRevision.size>0; },
+    get mesesRevisionLabel(){ return [...this.mesesRevision].sort().map(m=>this.ymLabel(m)).join(', '); },
+    // Egresos/Ingresos VISIBLES en el dashboard (excluye los meses en revisión)
+    get egresosDash(){ const r=this.mesesRevision; return r.size ? this.egresos.filter(e=>!r.has((e.fecha||'').slice(0,7))) : this.egresos; },
+    get ingresosDash(){ const r=this.mesesRevision; return r.size ? this.ingresos.filter(i=>!r.has((i.fecha||'').slice(0,7))) : this.ingresos; },
+    // meses del año activo ordenados ASC (antiguo -> reciente), excluyendo los en revisión
+    get mesesAsc(){
+      const set=new Set();
+      this.egresosDash.forEach(e=>{ if(e.fecha?.startsWith(this.anoActivo)) set.add(e.fecha.slice(0,7)); });
+      this.ingresosDash.forEach(i=>{ if(i.fecha?.startsWith(this.anoActivo)) set.add(i.fecha.slice(0,7)); });
+      return [...set].sort();
+    },
+    get dashPeriodoLabel(){
+      const yms=[...this.dashMeses].sort();
+      if(!yms.length) return this.anoActivo;
+      if(yms.length===1) return this.ymLabel(yms[0]);
+      if(yms.length===this.mesesAsc.length) return 'Todo '+this.anoActivo;
+      return yms.length+' meses · '+mesLabel(yms[0].slice(5,7))+'–'+mesLabel(yms[yms.length-1].slice(5,7))+' '+this.anoActivo;
+    },
+
+    get dashCards(){
+      const k=this.kpi, p=this.kpiPrev||{};
+      const multi=this.dashMeses.length>1;
+      const per=multi?this.dashMeses.length+' meses':'del mes';
+      return [
+        {label:'Ingresos', val:k.ing, cls:'', valCls:'color-pos', sub:per, d:this.kpiDelta(k.ing,p.ing,true)},
+        {label:'Egresos Fijos', val:k.fijo, cls:'', valCls:'', sub:multi?per:'suscripciones y fijos', d:this.kpiDelta(k.fijo,p.fijo,false)},
+        {label:'Egresos Variables', val:k.vari, cls:'', valCls:'', sub:multi?per:'gastos del mes', d:this.kpiDelta(k.vari,p.vari,false)},
+        {label:'Utilidad Neta', val:k.util, cls:k.util>=0?'is-positive':'is-negative', valCls:k.util>=0?'color-pos':'color-neg', sub:(k.util>=0?(multi?'período positivo':'mes positivo'):(multi?'período negativo':'mes negativo')), d:this.kpiDelta(k.util,p.util,true)},
+      ];
+    },
+
+    get rankingMeses(){
+      const ano=this.anoActivo;
+      const meses=['01','02','03','04','05','06','07','08','09','10','11','12'];
+      let rows=meses.map(m=>{
+        const items=this.egresosDash.filter(e=>e.fecha?.startsWith(`${ano}-${m}`)&&!e.es_transferencia);
+        return { ym:`${ano}-${m}`, label:mesLabelLargo(m), total:items.reduce((s,e)=>s+e.total,0), count:items.length };
+      }).filter(r=>r.total>0);
+      const max=Math.max(...rows.map(r=>r.total),1);
+      rows.forEach(r=>r.bar=r.total/max*100);
+      const byGasto=[...rows].sort((a,b)=>b.total-a.total);
+      byGasto.forEach((r,i)=>r.pos=i+1);
+      if(this.rankBy==='gasto') return byGasto;
+      return [...rows].sort((a,b)=>a.ym.localeCompare(b.ym));
+    },
+
+    get categoriasFiltradas(){ return [...new Set(this.egresosFiltered.map(e=>e.categoria))]; },
+
+    // meses (MM) con egresos en el año del filtro, orden ascendente (antiguo -> reciente)
+    get egMesesAsc(){
+      const set=new Set();
+      this.egresos.forEach(e=>{ if(!this.fE.ano || e.fecha?.startsWith(this.fE.ano)) set.add(e.fecha.slice(5,7)); });
+      return [...set].sort();
+    },
+    // resumen del período filtrado
+    get egResumen(){
+      const d=this.egresosFiltered;
+      let fijo=0,vari=0;
+      d.forEach(e=>{ fijo+=(e.egreso_fijo||0); vari+=(e.egreso_variable||0); });
+      return { total:fijo+vari, fijo, vari, mov:d.length, cats:this.categoriasFiltradas.length };
+    },
+
+    get egresosPorCategoria(){
+      const base=this.egresosFiltered;
+      const groups={};
+      base.forEach(e=>{ (groups[e.categoria] ||= {cat:e.categoria,total:0,count:0,items:[]}); groups[e.categoria].total+=e.total; groups[e.categoria].count++; groups[e.categoria].items.push(e); });
+      let arr=Object.values(groups);
+      const grand=arr.reduce((s,g)=>s+g.total,0)||1;
+      const max=Math.max(...arr.map(g=>g.total),1);
+      const orden=this.fE.ordenCat;
+      if(orden==='alfa') arr.sort((a,b)=>a.cat.localeCompare(b.cat));
+      else if(orden==='cantidad') arr.sort((a,b)=>b.count-a.count||b.total-a.total);
+      else arr.sort((a,b)=>b.total-a.total);
+      arr.forEach((g,i)=>{ g.pct=g.total/grand*100; g.bar=g.total/max*100; g.color=CHART.palette[i%CHART.palette.length]; g.items.sort((a,b)=>b.fecha.localeCompare(a.fecha)); });
+      return arr;
+    },
+
+    // agrupa las categorias en macro-grupos (nivel 1), con categorias como sub-items (nivel 2)
+    get egresosPorMacro(){
+      const cats=this.egresosPorCategoria;
+      const macros={};
+      cats.forEach(g=>{
+        const m=this.macroDe(g.cat);
+        (macros[m] ||= {macro:m,total:0,count:0,catCount:0,cats:[]});
+        macros[m].total+=g.total; macros[m].count+=g.count; macros[m].catCount++; macros[m].cats.push(g);
+      });
+      let arr=Object.values(macros);
+      const grand=arr.reduce((s,m)=>s+m.total,0)||1;
+      const max=Math.max(...arr.map(m=>m.total),1);
+      const orden=this.fE.ordenCat;
+      if(orden==='alfa') arr.sort((a,b)=>a.macro.localeCompare(b.macro));
+      else if(orden==='cantidad') arr.sort((a,b)=>b.count-a.count||b.total-a.total);
+      else arr.sort((a,b)=>b.total-a.total);
+      arr.forEach((m,i)=>{ m.pct=m.total/grand*100; m.bar=m.total/max*100; m.color=CHART.palette[i%CHART.palette.length]; const cmax=Math.max(...m.cats.map(c=>c.total),1); m.cats.forEach(c=>c.barInMacro=c.total/cmax*100); });
+      return arr;
+    },
+
+    get egresosFiltered(){
+      let d=[...this.egresos];
+      if(this.fE.ano) d=d.filter(e=>e.fecha?.startsWith(this.fE.ano));
+      if(this.fE.meses.length) d=d.filter(e=>this.fE.meses.includes(e.fecha?.slice(5,7)));
+      if(this.fE.cat) d=d.filter(e=>e.categoria===this.fE.cat);
+      if(this.fE.tipo) d=d.filter(e=>e.tipo===this.fE.tipo);
+      if(this.fE.q){ const q=this.fE.q.toLowerCase(); d=d.filter(e=>(e.detalle||'').toLowerCase().includes(q)||(e.categoria||'').toLowerCase().includes(q)); }
+      const k=this.fE.sortK, dir=this.fE.sortD==='asc'?1:-1;
+      d.sort((a,b)=>{ const va=a[k]??'',vb=b[k]??''; return typeof va==='number'?(va-vb)*dir:String(va).localeCompare(String(vb))*dir; });
+      return d;
+    },
+    get egresosPaginados(){ const s=(this.fE.pag-1)*25; return this.egresosFiltered.slice(s,s+25); },
+
+    get ingresosFiltered(){
+      let d=[...this.ingresos];
+      if(this.fI.ano) d=d.filter(i=>i.fecha?.startsWith(this.fI.ano));
+      if(this.fI.mes) d=d.filter(i=>i.fecha?.slice(5,7)===this.fI.mes);
+      if(this.fI.cat) d=d.filter(i=>i.categoria===this.fI.cat);
+      if(this.fI.soloReemb) d=d.filter(i=>i.es_reembolso);
+      const k=this.fI.sortK, dir=this.fI.sortD==='asc'?1:-1;
+      d.sort((a,b)=>{ const va=a[k]??'',vb=b[k]??''; return typeof va==='number'?(va-vb)*dir:String(va).localeCompare(String(vb))*dir; });
+      return d;
+    },
+    get ingresosPaginados(){ const s=(this.fI.pag-1)*25; return this.ingresosFiltered.slice(s,s+25); },
+
+    get patrimonioOrdenado(){ return [...this.patrimonio].sort((a,b)=>b.periodo.localeCompare(a.periodo)||a.institucion.localeCompare(b.institucion)); },
+    get totalYoy2025(){ return this.yoyRows.reduce((s,r)=>s+(r.ut_2025||0),0); },
+    get totalYoy2026(){ return this.yoyRows.reduce((s,r)=>s+(r.ut_2026||0),0); },
+
+    // ── Init ──
+    async init(){
+      if(this._ready) return; this._ready=true;
+      this.cargando=true;
+      try{
+        const meta=await db.vault.get('meta');
+        const tieneClaro=(await db.egresos.count())>0 || ((window.GASTOS_DATA?.egresos?.length||0)>0);
+        if(!meta){ this.gate.mode='entrar'; this._migrarPendiente=tieneClaro; }   // sin bóveda local: restaurar de la nube o crear cuenta
+        else { this.gate.mode='ingresar'; }
+      } catch(e){ this.gate.mode='crear'; }
+      this.cargando=false;
+    },
+
+    // ── Datos en claro (semilla / migración) ──
+    _plainDesdeSemilla(){
+      const data=window.GASTOS_DATA||{};
+      const egresos=(data.egresos||[]).map(e=>({...e, total:(e.egreso_fijo||0)+(e.egreso_variable||0), tipo:(e.egreso_fijo||0)>0?'fijo':'variable'}));
+      const ingresos=(data.ingresos||[]).map(normIngreso);
+      const patrimonio=(data.patrimonio||[]).map(x=>({...x}));
+      const yoy=(data.yoy||[]).map(r=>({mes:r.mes, ut_2025:r.ut_2025, ut_2026:r.ut_2026}));
+      // El Excel está conciliado hasta mayo: NO se cargan transacciones MP viejas como pendientes.
+      // La conciliación bancaria arranca cuando subes el reporte de junio en adelante.
+      const mp_hist=[];
+      return {egresos,ingresos,patrimonio,yoy,mp_hist,notas:{},macromap:{}};
+    },
+    async _plainDesdeClaro(){
+      return {
+        egresos:await db.egresos.toArray(),
+        ingresos:(await db.ingresos.toArray()).map(normIngreso),
+        patrimonio:await db.patrimonio.toArray(),
+        yoy:await db.yoy.toArray(),
+        mp_hist:await db.mp_hist.toArray(),
+        notas:Object.fromEntries((await db.notas.toArray()).map(n=>[n.clave,n.valor])),
+        macromap:Object.fromEntries((await db.macromap.toArray()).map(m=>[m.categoria,m.macro]))
+      };
+    },
+
+    // ── Hidratación / persistencia cifrada ──
+    _hidratar(plain){
+      plain=plain||{};
+      this.egresos=plain.egresos||[];
+      this.ingresos=(plain.ingresos||[]).map(normIngreso);
+      this.patrimonio=plain.patrimonio||[];
+      this._mpHist=plain.mp_hist||[];
+      this._mpUploads=plain.mp_uploads||[];
+      this._notas=plain.notas||{};
+      this.macroOverrides=plain.macromap||{};
+      this.yoyRows=(plain.yoy||[])
+        .map(r=>({...r, nota:(this._notas[r.mes]||''), delta:(r.ut_2025!=null&&r.ut_2026!=null)?(r.ut_2026-r.ut_2025):null}))
+        .sort((a,b)=>(ORDEN_MES[(a.mes||'').toUpperCase()]||99)-(ORDEN_MES[(b.mes||'').toUpperCase()]||99));
+      if(window.GASTOS_DATA?.generado) this.ultimaSync=window.GASTOS_DATA.generado.slice(0,10);
+      this._recomputarDerivados();
+    },
+    _recomputarDerivados(){
+      const seen=new Set();
+      this.mpPreCargadas=(this._mpHist||[]).filter(t=>!t.clasificado).filter(t=>{ if(seen.has(t.id_mp)) return false; seen.add(t.id_mp); return true; });
+      this.totalRegistros=this.egresos.length+this.ingresos.length;
+      const asc=this.mesesAsc;
+      this.dashMeses=this.dashMeses.filter(m=>asc.includes(m));
+      if(!this.dashMeses.length && asc.length) this.dashMeses=[asc[asc.length-1]];
+      this.calcKPI();
+    },
+    _snapshot(){
+      return {
+        egresos:this.egresos, ingresos:this.ingresos, patrimonio:this.patrimonio,
+        yoy:this.yoyRows.map(r=>({mes:r.mes,ut_2025:r.ut_2025,ut_2026:r.ut_2026})),
+        mp_hist:this._mpHist||[], notas:this._notas||{}, macromap:this.macroOverrides||{},
+        mp_uploads:this._mpUploads||[]
+      };
+    },
+    async persist(){ if(!VAULT_KEY) return; await saveVaultBlob(this._snapshot(), VAULT_KEY); this._cloudPush(); },
+    _nextId(arr){ return (arr||[]).reduce((m,x)=>Math.max(m,x.id||0),0)+1; },
+
+    // ── Sincronización en la nube (cifrada de extremo a extremo) ──
+    async _cloudPush(){
+      if(!SYNC_ID) return;
+      try{
+        const meta=await db.vault.get('meta'); const blob=await db.vault.get('blob');
+        if(!meta||!blob) return;
+        this.syncEstado='subiendo';
+        await cloudPut(meta.salt, blob.iv, blob.ct);
+        const row=await cloudFetch();
+        if(row) await db.vault.update('meta',{cloud_ts:row.updated_at});
+        this.syncEstado='al día';
+      }catch(e){ this.syncEstado='sin conexión'; }
+    },
+    async _cloudPull(opts={}){
+      if(!SYNC_ID||!VAULT_KEY) return;
+      try{
+        this.syncEstado='revisando';
+        const row=await cloudFetch();
+        if(!row){ if(opts.seedIfEmpty) await this._cloudPush(); else this.syncEstado='al día'; return; }
+        const meta=await db.vault.get('meta');
+        const localTS=(meta&&meta.cloud_ts)||'';
+        if((row.updated_at||'')>localTS){
+          let plain;
+          try{ plain=await decryptJSON({iv:row.iv,ct:row.ct}, VAULT_KEY); }
+          catch(e){ this.syncEstado='al día'; return; }   // sal distinta (otra contraseña): se ignora
+          await db.vault.put({k:'blob', iv:row.iv, ct:row.ct});
+          await db.vault.update('meta',{cloud_ts:row.updated_at, salt:row.salt});
+          this._hidratar(plain);
+          await this.reloadData();
+          this.syncEstado='actualizado';
+        } else if(localTS && localTS>(row.updated_at||'')){
+          await this._cloudPush();   // lo local es más nuevo: subirlo
+        } else { this.syncEstado='al día'; }
+      }catch(e){ this.syncEstado='sin conexión'; }
+    },
+    _startAutoSync(){
+      if(this._syncTimer) clearInterval(this._syncTimer);
+      this._syncTimer=setInterval(()=>{ if(this.unlocked && document.visibilityState==='visible') this._cloudPull(); }, 45000);
+    },
+    async sincronizarAhora(){ await this._cloudPull(); },
+
+    // ── Pantalla de candado / autenticación ──
+    _calcFuerza(){
+      const p=this.gate.pwd||'';
+      let s=0;
+      if(p.length>=10) s++; if(p.length>=14) s++; if(p.length>=18) s++;
+      let clases=0;
+      if(/[a-z]/.test(p)) clases++; if(/[A-Z]/.test(p)) clases++; if(/\d/.test(p)) clases++; if(/[^A-Za-z0-9]/.test(p)) clases++;
+      if(clases>=3) s++;
+      const palabras=p.trim().split(/\s+/).filter(Boolean);
+      if(palabras.length>=4 && p.length>=14) s=Math.max(s,3);
+      if(p.length<8) s=0;
+      s=Math.max(0,Math.min(4,s));
+      const labels=['Muy débil','Débil','Aceptable','Fuerte','Excelente'];
+      const colors=['#fb7185','#f6c177','#f6c177','#4ade9f','#34d399'];
+      this.gate.fuerza={ score:s, label:labels[s], pct:(s+1)/5*100, color:colors[s] };
+    },
+    async onCrear(){
+      const g=this.gate; this._calcFuerza();
+      if(g.pwd.length<10){ g.error='La contraseña debe tener al menos 10 caracteres.'; return; }
+      if(g.fuerza.score<2){ g.error='Elige una contraseña más fuerte (idealmente una frase de 4 palabras).'; return; }
+      if(g.pwd!==g.pwd2){ g.error='Las contraseñas no coinciden.'; return; }
+      g.error=''; this.cargando=true;
+      try{
+        const claroCount=await db.egresos.count();
+        const plain = claroCount>0 ? await this._plainDesdeClaro() : this._plainDesdeSemilla();
+        VAULT_KEY = await createVault(g.pwd, plain);
+        const ok=await db.vault.get('blob');
+        if(!ok) throw new Error('No se pudo crear la bóveda.');
+        if(claroCount>0){
+          await db.transaction('rw', db.egresos,db.ingresos,db.patrimonio,db.yoy,db.mp_hist,db.notas,db.macromap, async()=>{
+            await Promise.all([db.egresos.clear(),db.ingresos.clear(),db.patrimonio.clear(),db.yoy.clear(),db.mp_hist.clear(),db.notas.clear(),db.macromap.clear()]);
+          });
+        }
+        SYNC_ID=await deriveSyncId(g.pwd);   // id del casillero (antes de limpiar la contraseña)
+        g.pwd=''; g.pwd2='';
+        this._hidratar(plain);
+        this.unlocked=true;
+        await this.$nextTick();
+        this.initCharts();
+        this._cloudPull({seedIfEmpty:true});   // si la nube ya tiene datos, adoptarlos; si no, sembrarla
+        this._startAutoSync();
+      } catch(e){ g.error=(e&&e.message)||'No se pudo crear la bóveda.'; }
+      finally{ this.cargando=false; }
+    },
+    async onIngresar(){
+      const g=this.gate;
+      if(g.bloqueadoHasta>Date.now()) return;
+      if(!g.pwd){ g.error='Ingresa tu contraseña.'; return; }
+      this.cargando=true; g.error='';
+      let key=null;
+      try{ key=await unlockVault(g.pwd); }
+      catch(e){
+        this.cargando=false; g.intentos++; g.pwd='';
+        if(g.intentos>=5){ const espera=Math.min(30000,1000*Math.pow(2,g.intentos-5)); g.bloqueadoHasta=Date.now()+espera; this._tickBackoff(); }
+        g.error='Contraseña incorrecta.'; return;
+      }
+      try{
+        VAULT_KEY=key;
+        SYNC_ID=await deriveSyncId(g.pwd);   // id del casillero (antes de limpiar la contraseña)
+        const plain=await loadVaultBlob(VAULT_KEY);
+        this._hidratar(plain||{});
+        g.intentos=0; g.bloqueadoHasta=0; g.pwd='';
+        this.unlocked=true;
+        await this.$nextTick();
+        this.initCharts();
+        this._cloudPull({seedIfEmpty:true});   // reconciliar con la nube (siembra si está vacía; adopta si es más nueva)
+        this._startAutoSync();
+      } catch(e){ g.error='No se pudieron abrir los datos.'; }
+      finally{ this.cargando=false; }
+    },
+    // Equipo nuevo / primer uso: una sola contraseña — restaura desde la nube o crea la cuenta
+    async onEntrar(){
+      const g=this.gate;
+      if(!g.pwd){ g.error='Ingresa tu contraseña.'; return; }
+      this.cargando=true; g.error=''; this._sinNube=false;
+      try{
+        SYNC_ID=await deriveSyncId(g.pwd);
+        let row=null;
+        try{ row=await cloudFetch(); }catch(e){ this._sinNube=true; }
+        if(row){
+          const key=await deriveKey(g.pwd, b64ToBuf(row.salt));
+          let plain;
+          try{ plain=await decryptJSON({iv:row.iv,ct:row.ct}, key); }
+          catch(e){ this.cargando=false; g.pwd=''; g.error='Contraseña incorrecta (no coincide con tus datos en la nube).'; return; }
+          const ver=await encryptJSON(VERIFIER_PLAINTEXT, key);
+          await db.vault.bulkPut([
+            { k:'meta', kdf:'PBKDF2', hash:KDF_HASH, iter:KDF_ITER, salt:row.salt, v:1, cloud_ts:row.updated_at },
+            { k:'verifier', iv:ver.iv, ct:ver.ct },
+            { k:'blob', iv:row.iv, ct:row.ct }
+          ]);
+          VAULT_KEY=key; g.pwd='';
+          this._hidratar(plain);
+          this.unlocked=true; await this.$nextTick(); this.initCharts();
+          this.syncEstado='al día'; this._startAutoSync();
+        } else {
+          this.cargando=false;
+          this.gate.mode='crear';
+          this.gate.error = this._sinNube ? 'No se pudo conectar a la nube. Puedes crear tu cuenta local:' : 'No hay datos en la nube con esa contraseña. Si es tu primera vez, crea tu cuenta:';
+          return;
+        }
+      } catch(e){ g.error='No se pudo entrar. Revisa tu conexión e inténtalo de nuevo.'; }
+      finally{ this.cargando=false; }
+    },
+    _tickBackoff(){
+      if(this._backoffTimer) clearInterval(this._backoffTimer);
+      const upd=()=>{ const ms=this.gate.bloqueadoHasta-Date.now(); this.gate.espera=ms>0?Math.ceil(ms/1000):0; if(ms<=0){ clearInterval(this._backoffTimer); this._backoffTimer=null; this.gate.bloqueadoHasta=0; this.gate.error=''; } };
+      upd(); this._backoffTimer=setInterval(upd,250);
+    },
+    bloquear(){
+      VAULT_KEY=null; SYNC_ID=null; this.unlocked=false; this.syncEstado='—';
+      if(this._syncTimer){ clearInterval(this._syncTimer); this._syncTimer=null; }
+      this.egresos=[]; this.ingresos=[]; this.patrimonio=[]; this._mpHist=[]; this.mpPreCargadas=[]; this.yoyRows=[]; this.mpTransacciones=[];
+      this.gate.mode='ingresar'; this.gate.pwd=''; this.gate.error='';
+    },
+    async exportarRespaldoApp(){ if(!VAULT_KEY) return; try{ await exportarRespaldo(this._snapshot(), VAULT_KEY); }catch(e){ alert('No se pudo exportar el respaldo.'); } },
+    async importarRespaldoApp(ev){
+      const file=ev.target.files&&ev.target.files[0]; if(!file) return; ev.target.value='';
+      if(!confirm('Importar un respaldo REEMPLAZA tus datos actuales. ¿Continuar?')) return;
+      const pwd=prompt('Contraseña del respaldo:'); if(!pwd) return;
+      try{
+        const text=await file.text();
+        const plain=await importarRespaldo(text, pwd);
+        await saveVaultBlob(plain, VAULT_KEY);
+        this._hidratar(plain);
+        await this.reloadData();
+        alert('Respaldo importado correctamente.');
+      } catch(e){ alert('No se pudo importar (¿contraseña incorrecta o archivo inválido?).'); }
+    },
+
+    async reloadData(){
+      // ya no lee de Dexie en claro: recomputa derivados desde memoria y refresca gráficos
+      this.yoyRows.forEach(r=>{ r.delta=(r.ut_2025!=null&&r.ut_2026!=null)?(r.ut_2026-r.ut_2025):null; });
+      this._recomputarDerivados();
+      await this.$nextTick();
+      this.updateCharts();
+    },
+
+    onAnoChange(){
+      this.fE.ano=this.anoActivo; this.fI.ano=this.anoActivo; this.fE.pag=1; this.fI.pag=1;
+      this.dashMeses=[]; this.reloadData();
+    },
+
+    _kpiFor(ym){
+      const ing=this.ingresosDash.filter(i=>i.fecha?.startsWith(ym)&&!i.es_reembolso).reduce((s,i)=>s+(i.monto||0),0);
+      const egs=this.egresosDash.filter(e=>e.fecha?.startsWith(ym)&&!e.es_transferencia);
+      const fijo=egs.reduce((s,e)=>s+(e.egreso_fijo||0),0);
+      const vari=egs.reduce((s,e)=>s+(e.egreso_variable||0),0);
+      return {ing,fijo,vari,util:ing-fijo-vari,egr:fijo+vari};
+    },
+    _kpiForMonths(yms){
+      let ing=0,fijo=0,vari=0;
+      for(const ym of yms){ const k=this._kpiFor(ym); ing+=k.ing; fijo+=k.fijo; vari+=k.vari; }
+      return {ing,fijo,vari,util:ing-fijo-vari,egr:fijo+vari};
+    },
+    calcKPI(){
+      let yms=this.dashMeses.length?this.dashMeses:(this.mesesAsc.length?[this.mesesAsc[this.mesesAsc.length-1]]:[mesActual()]);
+      this.kpi=this._kpiForMonths(yms);
+      // delta vs mes anterior solo tiene sentido con un mes seleccionado
+      this.kpiPrev=(yms.length===1)?this._kpiFor(mesAnterior(yms[0])):null;
+    },
+    kpiDelta(cur,prev,higherIsGood){
+      if(prev==null||!prev) return null;
+      const pct=(cur-prev)/Math.abs(prev)*100;
+      if(!isFinite(pct)) return null;
+      const good=higherIsGood?pct>=0:pct<=0;
+      return {pct, good, arrow:pct>=0?'▲':'▼'};
+    },
+    onDashMonth(){ this.calcKPI(); this.$nextTick(()=>this.initChartTop()); },
+    setDashMonth(ym){ this.dashMeses=[ym]; this.onDashMonth(); },
+    toggleMes(ym){
+      const i=this.dashMeses.indexOf(ym);
+      if(i>=0){ if(this.dashMeses.length>1) this.dashMeses.splice(i,1); }
+      else this.dashMeses.push(ym);
+      this.dashMeses.sort();
+      this.onDashMonth();
+    },
+    selectAllMeses(){ this.dashMeses=[...this.mesesAsc]; this.onDashMonth(); },
+    soloUltimoMes(){ const a=this.mesesAsc; this.dashMeses=a.length?[a[a.length-1]]:[]; this.onDashMonth(); },
+    mesCorto(ym){ return ym?mesLabel(ym.slice(5,7)):''; },
+    mesNombreMM(mm){ return mesLabel(mm); },
+    toggleMesE(mm){
+      const i=this.fE.meses.indexOf(mm);
+      if(i>=0) this.fE.meses.splice(i,1); else this.fE.meses.push(mm);
+      this.fE.meses.sort(); this.fE.pag=1;
+    },
+    clearMesesE(){ this.fE.meses=[]; this.fE.pag=1; },
+    ymLabel(ym){ if(!ym) return ''; const [y,m]=ym.split('-'); return mesLabelLargo(m)+' '+y; },
+    toggleCat(cat){ this.expandedCats[cat]=!this.expandedCats[cat]; },
+    // ── Grupos (macro-categorias) ──
+    macroDe(cat){ return this.macroOverrides[cat] || MACRO_MAP[cat] || 'Otros'; },
+    async setMacro(cat,macro){ this.macroOverrides={...this.macroOverrides,[cat]:macro}; await this.persist(); },
+    async restaurarMacros(){ this.macroOverrides={}; await this.persist(); },
+    toggleMacro(m){ this.expandedMacros[m]=!this.expandedMacros[m]; },
+    abrirModalMacros(){ this.modales.macros=true; },
+
+    // ── Navigation ──
+    navTo(id){
+      this.view=id;
+      this.$nextTick(()=>{
+        if(id==='dashboard'){ this.initChartBar(); this.initChartTop(); }
+        if(id==='yoy') this.initChartYoY();
+      });
+    },
+
+    // ── Charts ──
+    initCharts(){
+      Chart.defaults.color=CHART.text;
+      Chart.defaults.font.family="'Inter',system-ui,sans-serif";
+      Chart.defaults.font.size=11;
+      this.initChartBar(); this.initChartTop();
+    },
+    updateCharts(){ this.initChartBar(); this.initChartTop(); },
+    safeCanvas(ref){ const c=this.$refs[ref]; if(!c) return null; const ex=Chart.getChart(c); if(ex) ex.destroy(); return c; },
+
+    initChartBar(){
+      const canvas=this.safeCanvas('chartBar'); if(!canvas) return;
+      const ano=this.anoActivo;
+      const labels=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+      const meses=['01','02','03','04','05','06','07','08','09','10','11','12'];
+      const dataIng=meses.map(m=>this.ingresosDash.filter(i=>i.fecha?.startsWith(`${ano}-${m}`)&&!i.es_reembolso).reduce((s,i)=>s+(i.monto||0),0));
+      const dataEgr=meses.map(m=>this.egresosDash.filter(e=>e.fecha?.startsWith(`${ano}-${m}`)&&!e.es_transferencia).reduce((s,e)=>s+e.total,0));
+      this.charts.bar=new Chart(canvas,{
+        type:'bar',
+        data:{labels,datasets:[
+          {label:'Ingresos',data:dataIng,backgroundColor:'rgba(52,211,153,.8)',borderRadius:5,maxBarThickness:22},
+          {label:'Egresos',data:dataEgr,backgroundColor:'rgba(251,113,133,.7)',borderRadius:5,maxBarThickness:22}
+        ]},
+        options:{responsive:true,maintainAspectRatio:true,
+          plugins:{legend:{labels:{color:CHART.text,boxWidth:10,usePointStyle:true,pointStyle:'circle',font:{size:11}}},
+            tooltip:{callbacks:{label:c=>' '+c.dataset.label+': '+clp(c.raw)}}},
+          scales:{x:{ticks:{color:CHART.tick,font:{size:10}},grid:{display:false}},
+                  y:{ticks:{color:CHART.tick,font:{size:10},callback:v=>'$'+(v/1000)+'k'},grid:{color:CHART.grid}}}}
+      });
+    },
+
+    initChartTop(){
+      const canvas=this.safeCanvas('chartTop'); if(!canvas) return;
+      const yms=this.dashMeses.length?this.dashMeses:this.mesesAsc.slice(-1);
+      const bycat={};
+      this.egresos.filter(e=>!e.es_transferencia && yms.some(ym=>e.fecha?.startsWith(ym))).forEach(e=>{ bycat[e.categoria]=(bycat[e.categoria]||0)+e.total; });
+      const sorted=Object.entries(bycat).sort((a,b)=>b[1]-a[1]).slice(0,7);
+      if(!sorted.length){
+        this.charts.top=new Chart(canvas,{type:'doughnut',data:{labels:['Sin datos'],datasets:[{data:[1],backgroundColor:['#1a1d22'],borderWidth:0}]},options:{plugins:{legend:{display:false}},cutout:'64%'}});
+        return;
+      }
+      this.charts.top=new Chart(canvas,{
+        type:'doughnut',
+        data:{labels:sorted.map(x=>x[0]),datasets:[{data:sorted.map(x=>x[1]),backgroundColor:CHART.palette,borderWidth:2,borderColor:'#0d0f12'}]},
+        options:{responsive:true,cutout:'62%',
+          plugins:{legend:{position:'right',labels:{color:CHART.text,boxWidth:9,font:{size:10},padding:7,usePointStyle:true,pointStyle:'circle'}},
+            tooltip:{callbacks:{label:c=>' '+c.label+': '+clp(c.raw)}}}}
+      });
+    },
+
+    initChartYoY(){
+      const canvas=this.safeCanvas('chartYoY'); if(!canvas||!this.yoyRows.length) return;
+      const labels=this.yoyRows.map(r=>r.mes.slice(0,3));
+      this.charts.yoy=new Chart(canvas,{
+        type:'line',
+        data:{labels,datasets:[
+          {label:'2025',data:this.yoyRows.map(r=>r.ut_2025??null),borderColor:CHART.info,backgroundColor:'rgba(122,162,247,.08)',tension:.4,pointRadius:3,pointBackgroundColor:CHART.info,fill:true,spanGaps:true},
+          {label:'2026',data:this.yoyRows.map(r=>r.ut_2026??null),borderColor:CHART.pos,backgroundColor:'rgba(52,211,153,.1)',tension:.4,pointRadius:3,pointBackgroundColor:CHART.pos,fill:true,spanGaps:true}
+        ]},
+        options:{responsive:true,maintainAspectRatio:true,
+          plugins:{legend:{labels:{color:CHART.text,usePointStyle:true,pointStyle:'circle',font:{size:11}}},
+            tooltip:{callbacks:{label:c=>' '+c.dataset.label+': '+clp(c.raw)}}},
+          scales:{x:{ticks:{color:CHART.tick,font:{size:10}},grid:{display:false}},
+                  y:{ticks:{color:CHART.tick,font:{size:10},callback:v=>'$'+(v/1000000).toFixed(1)+'M'},grid:{color:CHART.grid}}}}
+      });
+    },
+
+    initChartPatr(){
+      const canvas=this.safeCanvas('chartPatr'); if(!canvas||!this.patrimonio.length) return;
+      const periodos=[...new Set(this.patrimonio.map(p=>p.periodo))].sort();
+      const instituciones=[...new Set(this.patrimonio.map(p=>p.institucion))].sort();
+      const datasets=instituciones.map((inst,i)=>({
+        label:inst,
+        data:periodos.map(p=>{ const r=this.patrimonio.find(x=>x.periodo===p&&x.institucion===inst); return r?r.monto:0; }),
+        backgroundColor:(CHART.palette[i%CHART.palette.length])+'55',
+        borderColor:CHART.palette[i%CHART.palette.length], borderWidth:1.5, fill:true, tension:.3, pointRadius:2
+      }));
+      this.charts.patr=new Chart(canvas,{
+        type:'line',data:{labels:periodos,datasets},
+        options:{responsive:true,maintainAspectRatio:true,
+          plugins:{legend:{labels:{color:CHART.text,font:{size:10},boxWidth:9,usePointStyle:true,pointStyle:'circle'}},
+            tooltip:{callbacks:{label:c=>' '+c.dataset.label+': '+clp(c.raw)}}},
+          scales:{x:{stacked:true,ticks:{color:CHART.tick,font:{size:10}},grid:{display:false}},
+                  y:{stacked:true,ticks:{color:CHART.tick,font:{size:10},callback:v=>'$'+(v/1000000).toFixed(1)+'M'},grid:{color:CHART.grid}}}}
+      });
+    },
+
+    // ── Sort ──
+    sortEgresos(key){ if(this.fE.sortK===key) this.fE.sortD=this.fE.sortD==='asc'?'desc':'asc'; else {this.fE.sortK=key;this.fE.sortD='asc';} },
+    sortIngresos(key){ if(this.fI.sortK===key) this.fI.sortD=this.fI.sortD==='asc'?'desc':'asc'; else {this.fI.sortK=key;this.fI.sortD='asc';} },
+
+    yoyClass(v){ if(v==null) return 'cell-nil'; if(v>=1000000) return 'cell-pos-hi'; if(v>=0) return 'cell-pos'; return 'cell-neg'; },
+    async guardarNota(row){ this._notas[row.mes]=row.nota; await this.persist(); },
+
+    // ── CRUD Egreso ──
+    abrirModalEgreso(e){
+      if(e) this.form={...e, monto:e.total, cat_nueva:''};
+      else this.form={id:null,fecha:isoHoy(),categoria:'',cat_nueva:'',detalle:'',tipo:'variable',monto:0,es_transferencia:false,origen:'manual'};
+      this.modales.egreso=true;
+    },
+    async guardarEgreso(){
+      let cat=this.form.categoria==='__NUEVA__'?this.form.cat_nueva?.toUpperCase().trim():this.form.categoria;
+      if(!cat||!this.form.fecha||!this.form.monto) return;
+      const monto=parseInt(this.form.monto)||0;
+      const row={id:this.form.id||this._nextId(this.egresos),fecha:this.form.fecha,categoria:cat,detalle:this.form.detalle||'',tipo:this.form.tipo,egreso_fijo:this.form.tipo==='fijo'?monto:0,egreso_variable:this.form.tipo==='variable'?monto:0,total:monto,es_transferencia:!!this.form.es_transferencia,origen:this.form.origen||'manual'};
+      if(this.form.id){ const i=this.egresos.findIndex(e=>e.id===this.form.id); if(i>=0) this.egresos.splice(i,1,row); else this.egresos.push(row); }
+      else this.egresos.push(row);
+      await this.persist();
+      this.modales.egreso=false; await this.reloadData();
+    },
+    async eliminarEgreso(id){ if(!confirm('¿Eliminar este egreso?')) return; this.egresos=this.egresos.filter(e=>e.id!==id); await this.persist(); await this.reloadData(); },
+
+    // ── CRUD Ingreso ──
+    abrirModalIngreso(i){
+      if(i) this.form={...i};
+      else this.form={id:null,fecha:isoHoy(),categoria:'SUELDO LIQUIDO',detalle:'',monto:0,es_reembolso:false,reemb_concepto:'',origen:'manual'};
+      this.modales.ingreso=true;
+    },
+    async guardarIngreso(){
+      if(!this.form.categoria||!this.form.fecha||!this.form.monto) return;
+      const row={id:this.form.id||this._nextId(this.ingresos),fecha:this.form.fecha,categoria:this.form.categoria,detalle:this.form.detalle||'',monto:parseInt(this.form.monto)||0,es_reembolso:!!this.form.es_reembolso,reemb_concepto:this.form.reemb_concepto||'',origen:this.form.origen||'manual'};
+      if(this.form.id){ const i=this.ingresos.findIndex(x=>x.id===this.form.id); if(i>=0) this.ingresos.splice(i,1,row); else this.ingresos.push(row); }
+      else this.ingresos.push(row);
+      await this.persist();
+      this.modales.ingreso=false; await this.reloadData();
+    },
+    async eliminarIngreso(id){ if(!confirm('¿Eliminar este ingreso?')) return; this.ingresos=this.ingresos.filter(x=>x.id!==id); await this.persist(); await this.reloadData(); },
+
+    // ── CRUD Patrimonio ──
+    abrirModalPatrimonio(){ this.formPatr={periodo:mesActual(),institucion:'BANCO BICE',monto:0}; this.modales.patrimonio=true; },
+    async guardarPatrimonio(){
+      if(!this.formPatr.periodo||!this.formPatr.institucion) return;
+      this.patrimonio.push({id:this._nextId(this.patrimonio),...this.formPatr,monto:parseInt(this.formPatr.monto)||0});
+      await this.persist();
+      this.modales.patrimonio=false; await this.reloadData();
+    },
+
+    // ── Import MP ──
+    async onFileSelect(event){ const file=event.target.files[0]; if(file) await this.procesarArchivoMP(file); },
+    async onFileDrop(event){ const file=event.dataTransfer.files[0]; if(file) await this.procesarArchivoMP(file); },
+    async procesarArchivoMP(file){
+      this.cargando=true;
+      try{
+        const buf=await file.arrayBuffer();
+        const wb=XLSX.read(buf,{type:'array'});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:true});
+        if(rows.length<2){ alert('Archivo vacío o sin datos'); return; }
+        const header=rows[0].map(h=>String(h||'').trim().toUpperCase());
+        const idxId=header.findIndex(h=>h.includes('ID DE OPERACIÓN')||h.includes('ID DE OPERACION'));
+        const idxMed=header.findIndex(h=>h.includes('MEDIO DE PAGO'));
+        const idxTipo=header.findIndex(h=>h.includes('TIPO DE OPERACIÓN')||h.includes('TIPO DE OPERACION'));
+        const idxVal=header.findIndex(h=>h.includes('VALOR DE LA COMPRA'));
+        const idxFech=header.findIndex(h=>h.includes('FECHA DE ORIGEN'));
+        const idxNeto=header.findIndex(h=>h.includes('MONTO NETO'));
+        const cId=idxId<0?0:idxId, cMed=idxMed<0?1:idxMed, cTipo=idxTipo<0?2:idxTipo, cVal=idxVal<0?3:idxVal, cFech=idxFech<0?4:idxFech, cNeto=idxNeto<0?7:idxNeto;
+        const transacciones=[];
+        let nTotal=0, nCashback=0, nSinFecha=0;
+        const tipos={};   // desglose por TIPO DE OPERACIÓN (transparencia: cuántos de cada tipo trae el archivo)
+        for(let r=1;r<rows.length;r++){
+          const row=rows[r];
+          if(!row || row.every(c=>c===''||c==null)) continue;   // fila totalmente vacía
+          nTotal++;
+          const tipoOp=String(row[cTipo]||'').trim();
+          const tk=tipoOp||'(sin tipo)'; tipos[tk]=(tipos[tk]||0)+1;
+          if(tipoOp.toLowerCase().includes('cashback')){ nCashback++; continue; }   // Cashback (Meli Dólar): NO es movimiento bancario -> se elimina, no se muestra
+          const fecha=this.parseFechaMP(row[cFech]);
+          if(!fecha){ nSinFecha++; continue; }
+          const valor=parseFloat(row[cVal]||0)||0;
+          const medioPago=String(row[cMed]||'');
+          const idMp=String(row[cId]||r);
+          const montoNeto=parseFloat(row[cNeto]);
+          const neto=isNaN(montoNeto)?valor:montoNeto;   // MONTO NETO = desembolso bancario real
+          const tl=tipoOp.toLowerCase();
+          transacciones.push({id_mp:idMp,fecha,valor:Math.round(valor),monto_neto:Math.round(neto),tipo_op:tipoOp,medio_pago:medioPago,es_egreso:neto<0,es_cashback:false,es_devol:tl.includes('devol'),_cat:'',_estado:'',_matchInfo:'',_aceptada:false});
+        }
+        if(!transacciones.length){ alert('No se reconocieron movimientos con fecha en el archivo (revisa el formato).'); return; }
+        const fechas=transacciones.map(t=>t.fecha).filter(Boolean).sort();
+        const tiposArr=Object.entries(tipos).sort((a,b)=>b[1]-a[1]).map(([k,v])=>({tipo:k,n:v}));
+        this.mpReportePendiente={ transacciones, n:transacciones.length, desde:fechas[0]||'', hasta:fechas[fechas.length-1]||'', archivo:file.name||'reporte', nCashback, nTotal, nSinFecha, tipos:tiposArr };
+        this.mpBanco='Mercado Pago';
+        this.mpUltimoReporte={ archivo:file.name||'reporte', desde:fechas[0]||'', hasta:fechas[fechas.length-1]||'', n:transacciones.length, nCashback, nTotal, nSinFecha, tipos:tiposArr, banco:'Mercado Pago' };
+        await this.confirmarReporteMP();   // ir DIRECTO a la conciliación (sin pantalla intermedia "Revisar y sugerir")
+      } catch(e){ alert('No se pudo leer el archivo (formato no reconocido).'); }
+      finally { this.cargando=false; }
+    },
+    // Parsea la fecha del reporte MP en varios formatos: ISO texto (2026-06-20...), dd-mm-aaaa / dd/mm/aaaa, o serial de Excel
+    parseFechaMP(v){
+      if(v==null||v==='') return null;
+      if(typeof v==='number' && isFinite(v) && v>20000){   // serial de Excel (días desde 1900)
+        const d=new Date(Math.round((v-25569)*86400000));
+        return isNaN(d)?null:d.toISOString().slice(0,10);
+      }
+      const s=String(v).trim();
+      let m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);            if(m) return `${m[1]}-${m[2]}-${m[3]}`;
+      m=s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})/);    if(m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+      return null;
+    },
+    cancelarReporteMP(){ this.mpReportePendiente=null; },
+    async confirmarReporteMP(){
+      const rep=this.mpReportePendiente; if(!rep) return;
+      const banco=this.mpBanco||'Mercado Pago';
+      // Dedup: solo marcar "ya cargada" la que YA está RESUELTA en el historial (clasificada). Las pendientes se pueden re-revisar.
+      const histResueltas=new Set((this._mpHist||[]).filter(h=>h.clasificado).map(h=>String(h.id_mp)));
+      rep.transacciones.forEach(t=>{ if(histResueltas.has(String(t.id_mp))) t._dup=true; });
+      await this.conciliarMP(rep.transacciones, {banco});
+      this.mpReportePendiente=null;   // ya conciliado: salir de la pantalla intermedia y mostrar la tabla
+      // Registrar en el historial como PENDIENTE (clasificado:false) — nada se da por resuelto hasta que el usuario lo acepte/excluya
+      rep.transacciones.forEach(t=>{
+        if(t._estado==='dup') return;
+        if((this._mpHist||[]).some(h=>String(h.id_mp)===String(t.id_mp))) return;   // ya estaba registrado, no duplicar
+        this._mpHist.push({ id_mp:t.id_mp, fecha:t.fecha, valor:t.valor, monto_neto:t.monto_neto, tipo_op:t.tipo_op, medio_pago:t.medio_pago, banco, clasificado:false });
+      });
+      // Log de carga (retroalimentación del sistema)
+      const dups=rep.transacciones.filter(t=>t._estado==='dup').length;
+      const sugeridosConcil=rep.transacciones.filter(t=>t._estado==='match').length;   // ya estaban en tus gastos
+      const porRevisar=rep.transacciones.filter(t=>['nuevo','ingreso','reemb','devol'].includes(t._estado)).length;   // necesitan tu visto bueno
+      this._mpUploads.push({ fecha:isoHoy(), banco, archivo:rep.archivo, desde:rep.desde, hasta:rep.hasta, total:rep.n, documentos:rep.n, sugeridosConcil, porRevisar, duplicadas:dups });
+      await this.persist();
+    },
+    // Sugiere categoría para un egreso nuevo si hay un patrón recurrente claro (mismo monto en gastos previos)
+    sugerirCategoria(t){
+      const monto=Math.abs((t.monto_neto!=null&&!isNaN(t.monto_neto))?t.monto_neto:t.valor);
+      const similares=this.egresos.filter(e=>!e.es_transferencia && Math.abs(e.total-monto)<=Math.max(200,monto*0.01));
+      if(similares.length<2) return '';
+      const cnt={}; similares.forEach(e=>cnt[e.categoria]=(cnt[e.categoria]||0)+1);
+      const top=Object.entries(cnt).sort((a,b)=>b[1]-a[1]);
+      return top[0][1]>=2 ? top[0][0] : '';
+    },
+    async cargarMPPreCargadas(){ const trans=this.mpPreCargadas.map(t=>({...t,_cat:'',_estado:'',_matchInfo:'',_aceptada:false})); await this.conciliarMP(trans); },
+    async resetearMP(){
+      if(!confirm('Esto limpia el historial MP y re-siembra desde data.js. Las clasificaciones manuales se perderán. ¿Continuar?')) return;
+      const mp=(window.GASTOS_DATA?.mp_raw||[]).map(t=>({...t,clasificado:false}));
+      this._mpHist=mp;
+      await this.persist();
+      await this.reloadData();
+    },
+    async conciliarMP(transacciones, opts={}){
+      const egresosAll=this.egresos;
+      const usados=new Set();
+      for(const t of transacciones){
+        if(opts.banco) t.banco=opts.banco;
+        if(t._dup){ t._estado='dup'; continue; }   // ya cargada en un reporte anterior
+        // Recalcular flags desde los datos crudos (no confiar en lo guardado en la migración)
+        const tipo=(t.tipo_op||t.tipo_operacion||'').toLowerCase();
+        const esCashback=tipo.includes('cashback');
+        const esDevol=tipo.includes('devol');
+        const neto=(t.monto_neto!=null && !isNaN(t.monto_neto)) ? t.monto_neto : t.valor;   // desembolso bancario real
+        const esEgreso=neto<0;
+        t.es_egreso=esEgreso; t.es_cashback=esCashback; t.es_devol=esDevol;
+        if(esCashback){ t._estado='cashback'; continue; }   // Cashback (Meli Dólar): se muestra pero NO se importa
+        if(esDevol){ t._estado='devol'; continue; }
+        const montoAbs=Math.abs(neto);
+        if(esEgreso){
+          // Mejor match por cercanía de fecha, sin reutilizar el mismo EGRESO
+          let best=null, bestDelta=Infinity;
+          for(const e of egresosAll){
+            if(usados.has(e.id)) continue;
+            const dd=daysDiff(e.fecha,t.fecha); if(dd>3) continue;
+            const diff=Math.abs(e.total-montoAbs);
+            if(diff>Math.max(500,montoAbs*0.03)) continue;
+            const score=dd+diff/100000;
+            if(score<bestDelta){ bestDelta=score; best=e; }
+          }
+          if(best){ usados.add(best.id); t._estado='match'; t._matchInfo=`${fmtFecha(best.fecha)} · ${best.categoria} · ${clp(best.total)}`; }
+          else {
+            // No está en EGRESOS: el sistema pregunta grupo + categoría + detalle (sugiere si hay patrón recurrente)
+            t._estado='nuevo'; t._det=t._det||''; t._catNueva='';
+            const sug=this.sugerirCategoria(t);
+            if(sug){ t._cat=sug; t._grupo=this.macroDe(sug); t._sugerida=true; } else { t._cat=''; t._grupo=''; t._sugerida=false; }
+          }
+        } else {
+          // Crédito (ingreso). Montos ínfimos de MP = rentabilidad/beneficio -> INTERESES
+          t._catNueva='';
+          const esRangoCancha=(montoAbs>=2000&&montoAbs<=3500)||(montoAbs>=14000&&montoAbs<=22000);
+          if(montoAbs<2000){ t._estado='ingreso'; t._cat='INTERESES'; t._det='INTERESES Mercado Pago'; }
+          else if(esRangoCancha){ t._estado='reemb'; t._cat='FUTBOL'; t._grupo=this.macroDe('FUTBOL'); t._det=t._det||''; }
+          else { t._estado='ingreso'; t._cat=t._cat||''; t._det=t._det||''; }
+        }
+      }
+      transacciones.sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));   // más reciente -> más antiguo
+      const batch=(this._mpRenderBatch=(this._mpRenderBatch||0)+1);          // clave de render única por carga
+      transacciones.forEach((t,i)=>{ t._rk=batch+'_'+i; });                  // evita que Alpine reuse el DOM viejo al re-subir el mismo archivo
+      this.mpFiltro='todos';   // al entrar a conciliar, mostrar SIEMPRE todos (no quedar pegado en un filtro viejo)
+      this.mpTransacciones=[];                 // limpiar primero...
+      if(this.$nextTick) await this.$nextTick();   // ...soltar las filas viejas...
+      this.mpTransacciones=transacciones;      // ...y reconstruir limpio (se muestran TODAS para verificar)
+    },
+    async cargarAceptadas(){
+      const aceptadas=this.mpTransacciones.filter(t=>t._aceptada && !t._excluido);
+      if(!aceptadas.length){ alert('No has aceptado ninguna sugerencia todavía.\nRevisa cada movimiento y pulsa “✓ Aceptar” (o “Aceptar todas”) en los que estén correctos. Nada se carga sin tu visto bueno.'); return; }
+      let nuevosRegistros=0;
+      for(const t of aceptadas){
+        const monto=Math.abs((t.monto_neto!=null&&!isNaN(t.monto_neto))?t.monto_neto:t.valor);
+        const fuente=t.banco||'Mercado Pago';
+        const cat = t._cat==='__NUEVA__' ? (t._catNueva||'').toUpperCase().trim() : t._cat;
+        const det = (t._det||'').trim();
+        if(t._estado==='nuevo' && cat){
+          this.egresos.push({id:this._nextId(this.egresos),fecha:t.fecha,categoria:cat,detalle:det||`${fuente} · ${t.tipo_op}`,tipo:'variable',egreso_fijo:0,egreso_variable:monto,total:monto,es_transferencia:cat==='REGULARIZACIÓN BICE',origen:'mp_import'});
+          if(t._grupo) this.macroOverrides={...this.macroOverrides,[cat]:t._grupo};   // recuerda el grupo de la categoría
+          nuevosRegistros++;
+        } else if((t._estado==='ingreso'||t._estado==='reemb') && cat){
+          this.ingresos.push({id:this._nextId(this.ingresos),fecha:t.fecha,categoria:cat,detalle:det||(t._estado==='reemb'?'Reembolso cancha MP':fuente),monto,es_reembolso:t._estado==='reemb',reemb_concepto:t._estado==='reemb'?'Reembolso cancha MP':'',origen:'mp_import'});
+          nuevosRegistros++;
+        }
+        // 'match' (ya está en EGRESOS) y 'devol' (informativa): aceptarlas sólo las marca como revisadas, NO crea registro nuevo
+      }
+      // Sincronizar el historial: "resuelta" = aceptada y cargada | excluida manualmente
+      const idsResueltas=new Set();
+      for(const t of this.mpTransacciones){
+        if(t._estado==='dup') continue;
+        const resuelta=(t._aceptada && !t._excluido) || !!t._excluido;
+        if(resuelta) idsResueltas.add(String(t.id_mp));
+        let mh=(this._mpHist||[]).find(x=>String(x.id_mp)===String(t.id_mp));
+        if(!mh){ mh={id_mp:t.id_mp,fecha:t.fecha,valor:t.valor,monto_neto:t.monto_neto,tipo_op:t.tipo_op,banco:t.banco||'Mercado Pago'}; this._mpHist.push(mh); }
+        mh.clasificado = resuelta;
+      }
+      await this.persist();
+      // Conservar visibles los movimientos AÚN sin resolver (ni aceptados ni excluidos) para seguir el doble check
+      const pendientes=this.mpTransacciones.filter(t=>t._estado!=='dup' && !idsResueltas.has(String(t.id_mp)));
+      await this.reloadData();
+      this.mpFiltro='todos';   // mostrar todo lo que aún queda por resolver
+      this.mpTransacciones=pendientes;
+      const msg = `✓ Funcionó: cargaste ${aceptadas.length} movimiento(s) seleccionado(s)`
+        + (nuevosRegistros?` (${nuevosRegistros} registro(s) nuevo(s) en tus gastos)`:'')
+        + '.\n'
+        + (pendientes.length
+            ? `Quedan ${pendientes.length} pendiente(s) de revisar — siguen abajo en la tabla. Su mes NO entra al dashboard hasta que los selecciones o excluyas.`
+            : `No quedan pendientes en este reporte. ✔`);
+      alert(msg);
+    },
+
+    // ── Export CSV ──
+    exportarCSV(){
+      if(this.view==='egresos'){
+        const data=this.egresosFiltered;
+        const header='Fecha,Categoría,Detalle,Tipo,Egreso Fijo,Egreso Variable,Total\n';
+        const rows=data.map(e=>`${fmtFecha(e.fecha)},"${e.categoria}","${e.detalle||''}",${e.tipo},${e.egreso_fijo||0},${e.egreso_variable||0},${e.total}`).join('\n');
+        this.descargar(header+rows,`egresos_${this.fE.ano||'todos'}.csv`);
+      } else if(this.view==='ingresos'){
+        const data=this.ingresosFiltered;
+        const header='Fecha,Categoría,Detalle,Monto,Reembolso\n';
+        const rows=data.map(i=>`${fmtFecha(i.fecha)},"${i.categoria}","${i.detalle||i.reemb_concepto||''}",${i.monto},${i.es_reembolso?'Sí':'No'}`).join('\n');
+        this.descargar(header+rows,`ingresos_${this.fI.ano||'todos'}.csv`);
+      }
+    },
+    descargar(content,filename){
+      const bom='﻿';
+      const blob=new Blob([bom+content],{type:'text/csv;charset=utf-8'});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a'); a.href=url; a.download=filename; a.click();
+      URL.revokeObjectURL(url);
+    },
+
+    // ── Exportar TODO a Excel (2 hojas: Egresos e Ingresos) ──
+    exportarExcel(){
+      const egRows=[...this.egresos].sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||'')).map(e=>({
+        'Fecha': fmtFecha(e.fecha),
+        'Grupo (itemización)': this.macroDe(e.categoria),
+        'Categoría (sub-ítem)': e.categoria,
+        'Detalle': e.detalle||'',
+        'Tipo': e.es_transferencia?'Transferencia':(e.tipo==='fijo'?'Fijo':'Variable'),
+        'Monto': e.total
+      }));
+      const inRows=[...this.ingresos].sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||'')).map(i=>({
+        'Fecha': fmtFecha(i.fecha),
+        'Categoría (itemización)': i.categoria,
+        'Detalle (sub-ítem)': i.detalle||i.reemb_concepto||'',
+        'Tipo': i.es_reembolso?'Reembolso':'Ingreso',
+        'Monto': i.monto
+      }));
+      const wb=XLSX.utils.book_new();
+      const wsE=XLSX.utils.json_to_sheet(egRows,{header:['Fecha','Grupo (itemización)','Categoría (sub-ítem)','Detalle','Tipo','Monto']});
+      const wsI=XLSX.utils.json_to_sheet(inRows,{header:['Fecha','Categoría (itemización)','Detalle (sub-ítem)','Tipo','Monto']});
+      wsE['!cols']=[{wch:12},{wch:22},{wch:24},{wch:30},{wch:14},{wch:14}];
+      wsI['!cols']=[{wch:12},{wch:24},{wch:30},{wch:12},{wch:14}];
+      XLSX.utils.book_append_sheet(wb,wsE,'Egresos');
+      XLSX.utils.book_append_sheet(wb,wsI,'Ingresos');
+      XLSX.writeFile(wb,`Control de Gastos - ${isoHoy()}.xlsx`);
+    },
+
+    // ── Exportar el Dashboard a PDF (foto del momento, vía impresión del navegador) ──
+    exportarPDF(){
+      if(this.view!=='dashboard') this.navTo('dashboard');
+      this.$nextTick(()=>{ window.print(); });
+    },
+
+    // ── Reiniciar datos al Excel (Contabilidad) y limpiar Mercado Pago ──
+    async reiniciarAExcel(){
+      if(!confirm('Reiniciar a Excel: reemplaza egresos/ingresos/patrimonio con los datos del Excel (Contabilidad) y deja Mercado Pago LIMPIO. Se pierde lo importado de MP y ediciones manuales; tus grupos y notas se conservan. ¿Continuar?')) return;
+      const plain=this._plainDesdeSemilla();
+      plain.mp_hist=[]; plain.mp_uploads=[];
+      plain.notas=this._notas||{};
+      plain.macromap=this.macroOverrides||{};
+      await saveVaultBlob(plain, VAULT_KEY);
+      this._hidratar(plain);
+      this.mpTransacciones=[]; this.mpReportePendiente=null;
+      await this.reloadData();
+      alert('Listo: datos reiniciados según el Excel. Mercado Pago quedó limpio para cargar junio.');
+    }
+  };
+}
+</script>
+</body>
+</html>

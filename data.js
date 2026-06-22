@@ -1,0 +1,1 @@
+window.GASTOS_DATA = {egresos:[],ingresos:[],patrimonio:[],yoy:[],mp_raw:[]};
